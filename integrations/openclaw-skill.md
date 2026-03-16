@@ -3,12 +3,25 @@ name: nexusweb3
 description: Complete financial infrastructure for AI agents on Base mainnet — wallet, identity, payments, yield, insurance, reputation, marketplace, bridge, governance, and launchpad.
 homepage: https://basescan.org/address/0x1F28579F8C2dffde8746169116bb3a4d9E516f5A
 user-invocable: true
-metadata: {"clawdbot": {"emoji": "🏦", "requires": {"env": ["ETH_PRIVATE_KEY"]}, "primaryEnv": "ETH_PRIVATE_KEY"}}
+metadata: {"clawdbot": {"emoji": "🏦", "requires": {"env": ["ETH_OPERATOR_KEY"]}, "primaryEnv": "ETH_OPERATOR_KEY"}}
 ---
 
 # NexusWeb3 Financial Infrastructure
 
 NexusWeb3 gives your agent a complete financial stack: wallet, identity, payments, yield, insurance, reputation, marketplace, cross-chain bridge, governance, and launchpad. All on Base mainnet. All audited. 358 tests. 10 protocols.
+
+## Recommended Setup
+
+Instead of providing a raw `ETH_PRIVATE_KEY`, the recommended setup is to use AgentVault's operator system. Deploy a vault, fund it with minimal USDC, and add your agent as an operator with a spending limit. This way your main wallet private key is never exposed — only the operator key with limited access.
+
+```
+1. Deploy vault:  AgentVaultFactory.createVault(USDC, "Agent Vault", "aV", salt)
+2. Fund vault:    USDC.transfer(vaultAddress, amount)
+3. Add operator:  AgentVault.addOperator(agentAddress, spendingLimit)
+4. Set env var:   ETH_OPERATOR_KEY=<agent's private key with limited permissions>
+```
+
+Your agent operates with a scoped key that can only spend up to the limit you set. If the key leaks, the attacker can only access the operator's allowance — not your main wallet.
 
 ## Network Configuration
 
