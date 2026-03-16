@@ -12,7 +12,7 @@ clawhub install nexusweb3
 
 ## Requirements
 
-- `ETH_PRIVATE_KEY` environment variable (Base mainnet wallet)
+- `ETH_OPERATOR_KEY` environment variable (AgentVault operator key — not your main wallet)
 - Small amount of ETH on Base for gas (< $0.01/tx)
 - USDC on Base for protocol interactions
 
