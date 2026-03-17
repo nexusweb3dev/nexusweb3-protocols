@@ -166,7 +166,7 @@ contract AgentVault is ERC4626, Ownable, ReentrancyGuard, Pausable, IAgentVault 
     // ─── Sweep (recover stuck tokens) ───────────────────────────────────
 
     function sweep(address token) external onlyOwner {
-        if (token == asset()) revert("AgentVault: cannot sweep vault asset");
+        if (token == asset()) revert CannotSweepVaultAsset();
 
         uint256 balance = IERC20(token).balanceOf(address(this));
         if (balance == 0) revert ZeroAmount();

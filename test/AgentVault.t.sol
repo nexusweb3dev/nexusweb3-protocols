@@ -426,7 +426,7 @@ contract AgentVaultTest is Test {
 
     function test_revert_sweepVaultAsset() public {
         vm.prank(alice);
-        vm.expectRevert("AgentVault: cannot sweep vault asset");
+        vm.expectRevert(IAgentVault.CannotSweepVaultAsset.selector);
         vault.sweep(address(token));
     }
 

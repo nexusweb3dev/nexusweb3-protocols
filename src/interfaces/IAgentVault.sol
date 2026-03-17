@@ -23,6 +23,7 @@ interface IAgentVault is IERC4626 {
     error OperatorAlreadyExists(address operator);
     error OperatorDoesNotExist(address operator);
     error FeeTooHigh(uint256 bps);
+    error CannotSweepVaultAsset();
     error ZeroAddress();
     error ZeroAmount();
 
