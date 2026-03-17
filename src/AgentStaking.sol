@@ -35,7 +35,7 @@ contract AgentStaking is Ownable, ReentrancyGuard, Pausable, IAgentStaking {
         nexusToken = nexusToken_;
         treasury = treasury_;
 
-        _boostForLockDays[0] = 10000;    // 1x
+        _boostForLockDays[7] = 10000;     // 1x  (7-day minimum prevents flash loan attacks)
         _boostForLockDays[30] = 12500;   // 1.25x
         _boostForLockDays[90] = 15000;   // 1.5x
         _boostForLockDays[180] = 20000;  // 2x
@@ -52,7 +52,8 @@ contract AgentStaking is Ownable, ReentrancyGuard, Pausable, IAgentStaking {
 
         // weighted = amount * boost / 10000
         uint256 weighted = amount * boost / 10000;
-        uint48 lockUntil = lockDays > 0 ? uint48(block.timestamp + lockDays * 1 days) : uint48(0);
+        // all stakes have a real lock — minimum 7 days prevents flash loan attacks
+        uint48 lockUntil = uint48(block.timestamp + lockDays * 1 days);
 
         stakeId = stakeCount++;
         _stakes[stakeId] = StakeInfo({
@@ -138,12 +139,15 @@ contract AgentStaking is Ownable, ReentrancyGuard, Pausable, IAgentStaking {
         emit RevenueDistributed(revenue, totalWeightedStake);
     }
 
+    event RevenueReceived(address indexed from, uint256 amount);
+
     /// @notice Receive ETH revenue from authorized protocols.
     function addRevenue() external payable {
         if (!_authorizedProtocols[msg.sender] && msg.sender != owner()) {
             revert NotAuthorizedProtocol(msg.sender);
         }
         pendingRevenue += msg.value;
+        emit RevenueReceived(msg.sender, msg.value);
     }
 
     // Allow direct ETH receives (from fee collection)

@@ -37,7 +37,7 @@ contract AgentStakingTest is Test {
 
     function _stakeDefault() internal returns (uint256) {
         vm.prank(alice);
-        return staking.stake(STAKE_AMT, 0); // flexible, 1x boost
+        return staking.stake(STAKE_AMT, 7); // flexible, 1x boost
     }
 
     function _addRevenue(uint256 amount) internal {
@@ -53,7 +53,7 @@ contract AgentStakingTest is Test {
         assertEq(staking.treasury(), treasury);
         assertEq(staking.owner(), owner);
         assertEq(staking.totalWeightedStake(), 0);
-        assertEq(staking.getBoost(0), 10000);
+        assertEq(staking.getBoost(7), 10000);
         assertEq(staking.getBoost(30), 12500);
         assertEq(staking.getBoost(90), 15000);
         assertEq(staking.getBoost(180), 20000);
@@ -72,14 +72,14 @@ contract AgentStakingTest is Test {
 
     // ─── Stake ──────────────────────────────────────────────────────────
 
-    function test_stakeFlexible() public {
-        uint256 id = _stakeDefault();
+    function test_stakeMinLock() public {
+        uint256 id = _stakeDefault(); // 7-day min lock
 
         IAgentStaking.StakeInfo memory s = staking.getStake(id);
         assertEq(s.owner, alice);
         assertEq(s.amount, STAKE_AMT);
         assertEq(s.weightedAmount, STAKE_AMT); // 1x boost
-        assertEq(s.lockUntil, 0);
+        assertEq(s.lockUntil, uint48(block.timestamp + 7 days));
         assertTrue(s.active);
         assertEq(staking.totalWeightedStake(), STAKE_AMT);
     }
@@ -110,7 +110,7 @@ contract AgentStakingTest is Test {
 
     function test_multipleStakes() public {
         vm.startPrank(alice);
-        staking.stake(STAKE_AMT, 0);
+        staking.stake(STAKE_AMT, 7);
         staking.stake(STAKE_AMT, 90);
         vm.stopPrank();
 
@@ -122,7 +122,7 @@ contract AgentStakingTest is Test {
     function test_revert_stakeZero() public {
         vm.prank(alice);
         vm.expectRevert(IAgentStaking.ZeroAmount.selector);
-        staking.stake(0, 0);
+        staking.stake(0, 7);
     }
 
     function test_revert_stakeInvalidLock() public {
@@ -137,13 +137,15 @@ contract AgentStakingTest is Test {
 
         vm.prank(alice);
         vm.expectRevert();
-        staking.stake(STAKE_AMT, 0);
+        staking.stake(STAKE_AMT, 7);
     }
 
     // ─── Unstake ────────────────────────────────────────────────────────
 
-    function test_unstakeFlexible() public {
+    function test_unstakeAfter7DayLock() public {
         uint256 id = _stakeDefault();
+
+        vm.warp(block.timestamp + 8 days);
 
         uint256 balBefore = nexus.balanceOf(alice);
         vm.prank(alice);
@@ -186,6 +188,7 @@ contract AgentStakingTest is Test {
     function test_revert_unstakeInactive() public {
         uint256 id = _stakeDefault();
 
+        vm.warp(block.timestamp + 8 days);
         vm.prank(alice);
         staking.unstake(id);
 
@@ -228,6 +231,8 @@ contract AgentStakingTest is Test {
         _addRevenue(4 ether);
         staking.distributeRevenue();
 
+        vm.warp(block.timestamp + 8 days);
+
         uint256 balBefore = alice.balance;
         vm.prank(alice);
         staking.unstake(0);
@@ -238,7 +243,7 @@ contract AgentStakingTest is Test {
     function test_proportionalRewards() public {
         // alice stakes 1000 (1x), bob stakes 1000 (3x with 365-day lock)
         vm.prank(alice);
-        staking.stake(STAKE_AMT, 0); // weight = 1000
+        staking.stake(STAKE_AMT, 7); // weight = 1000
         vm.prank(bob);
         staking.stake(STAKE_AMT, 365); // weight = 3000
 
@@ -348,7 +353,9 @@ contract AgentStakingTest is Test {
         amount = bound(amount, 1e18, 50_000e18);
 
         vm.prank(alice);
-        uint256 id = staking.stake(amount, 0);
+        uint256 id = staking.stake(amount, 7);
+
+        vm.warp(block.timestamp + 8 days);
 
         uint256 balBefore = nexus.balanceOf(alice);
         vm.prank(alice);

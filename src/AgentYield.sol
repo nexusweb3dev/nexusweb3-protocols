@@ -108,14 +108,14 @@ contract AgentYield is ERC4626, Ownable, ReentrancyGuard, Pausable, IAgentYield 
         uint256 yieldAmount = currentAssets - deposited;
         uint256 fee = yieldAmount.mulDiv(performanceFeeBps, BPS_DENOMINATOR, Math.Rounding.Floor);
 
-        if (fee > 0) {
-            // withdraw fee from Aave and send to treasury
-            aavePool.withdraw(asset(), fee, treasury);
-            totalFeeCollected += fee;
-        }
+        // CEI: update state before external call
+        totalFeeCollected += fee;
+        // estimate post-withdrawal balance (currentAssets - fee)
+        lastHarvestedAssets = currentAssets - fee;
 
-        // update baseline to current assets (after fee withdrawal)
-        lastHarvestedAssets = aToken.balanceOf(address(this));
+        if (fee > 0) {
+            aavePool.withdraw(asset(), fee, treasury);
+        }
 
         emit YieldHarvested(yieldAmount, fee, treasury);
     }
