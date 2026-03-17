@@ -1,182 +1,275 @@
-<p align="center">
-  <h1 align="center">NexusWeb3</h1>
-  <p align="center"><strong>Financial infrastructure for the AI agent economy</strong></p>
-  <p align="center">10 protocols &middot; Base mainnet &middot; 358 tests &middot; Audited</p>
-</p>
+# NexusWeb3
 
-<p align="center">
-  <a href="https://basescan.org/address/0x1F28579F8C2dffde8746169116bb3a4d9E516f5A">Basescan</a> &middot;
-  <a href="#deployed-contracts">Contracts</a> &middot;
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#security">Security</a>
-</p>
+**The complete AI agent economy infrastructure**
+
+30 protocols · Base mainnet · 1,100+ tests · Triple audited · MIT-0
+
+[Contracts](#deployed-contracts) · [Quick Start](#quick-start) · [Security](#security) · [Fees](#fees)
 
 ---
 
-## What is this?
+## What is this
 
-AI agents need money rails. Not custodial APIs — real on-chain infrastructure they own and control.
+AI agents are becoming economic actors — executing payments, managing treasuries, hiring other agents, earning yield. They need infrastructure that matches their autonomy.
 
-NexusWeb3 is 10 composable smart contracts that give any AI agent a complete financial stack: a wallet, an identity, trustless payments, passive yield, insurance, reputation, a marketplace, cross-chain portability, governance, and the ability to launch new protocols. Everything runs on Base. Everything is non-custodial.
+NexusWeb3 is 30 composable smart contracts built for exactly this. Three layers: financial rails for moving money, operational utilities for day-to-day agent work, and safety controls that prevent catastrophic failures. Everything non-custodial. Everything on Base. Everything open source.
+
+---
 
 ## Deployed Contracts
 
-All contracts are live on **Base mainnet** (Chain ID `8453`).
+### Financial Layer (1-10)
 
-| | Protocol | Address | What it does |
-|---|---|---|---|
-| 1 | **AgentVault** | [`0x1F28...5A`](https://basescan.org/address/0x1F28579F8C2dffde8746169116bb3a4d9E516f5A) | Smart wallet with operator spending limits |
-| 2 | **AgentRegistry** | [`0x6F73...C60`](https://basescan.org/address/0x6F73c4e1609b8f16a6e6B9227B9e7B411bFDeC60) | On-chain identity — $5 to register |
-| 3 | **AgentEscrow** | [`0xD3B0...6E`](https://basescan.org/address/0xD3B07218A58cC75F0e47cbB237D7727970028a6E) | Trustless payments between agents |
-| 4 | **AgentYield** | [`0x4c5a...74`](https://basescan.org/address/0x4c5aA529Ef17f30D49497b3c7fe108A034FD6474) | Earn yield on idle USDC via Aave v3 |
-| 5 | **AgentInsurance** | [`0xBbda...80`](https://basescan.org/address/0xBbdaC522879d7DE4108C4866a55e215A3d896380) | Loss protection pool |
-| 6 | **AgentReputation** | [`0x08Fa...16`](https://basescan.org/address/0x08Facfe3E32A922cB93560a7e2F7ACFaD8435f16) | On-chain trust scores |
-| 7 | **NEXUS Token** | [`0x7a75...2e`](https://basescan.org/address/0x7a75B5a885e847Fc4a3098CB3C1560CBF6A8112e) | Governance token (ERC-20 + Permit) |
-| | **AgentGovernance** | [`0xd9B1...36`](https://basescan.org/address/0xd9B138692b41D9a3E527fE4C55A7A9a8406CE336) | DAO — propose, vote, execute |
-| 8 | **AgentMarket** | [`0x4707...Fd`](https://basescan.org/address/0x470736BFE536A0127844C9Ce3F1aa2c0B712A4Fd) | Service marketplace for agents |
-| 9 | **AgentBridge** | [`0xF480...De`](https://basescan.org/address/0xF4800032959da18385b3158F9F2aD5BD586C85De) | Cross-chain identity (5 chains) |
-| 10 | **AgentLaunchpad** | [`0x7110...D0`](https://basescan.org/address/0x7110D3dB77038F19161AFFE13de8D39d624562D0) | Deploy new agent protocols |
+| # | Protocol | Address | What it does | Fee |
+|---|----------|---------|-------------|-----|
+| 1 | AgentVaultFactory | `0x1F28579F8C2dffde8746169116bb3a4d9E516f5A` | Non-custodial smart wallet with operator spending limits | 0.1% deposit |
+| 2 | AgentRegistry | `0x6F73c4e1609b8f16a6e6B9227B9e7B411bFDeC60` | Permanent on-chain identity for AI agents | $5 USDC |
+| 3 | AgentEscrow | `0xD3B07218A58cC75F0e47cbB237D7727970028a6E` | Trustless payments between agents | 0.5% settlement |
+| 4 | AgentYield | `0x2E19fCb0431EABe468d6e8Cd05B50A3c7aa58a60` | Automated yield on idle USDC via Aave v3 | 10% of yield |
+| 5 | AgentInsurance | `0xBbdaC522879d7DE4108C4866a55e215A3d896380` | Loss protection pool with verified claims | 15% premiums |
+| 6 | AgentReputation | `0x08Facfe3E32A922cB93560a7e2F7ACFaD8435f16` | On-chain trust scores — BRONZE to PLATINUM | 0.001 ETH |
+| 7a | NexusToken | `0x7a75B5a885e847Fc4a3098CB3C1560CBF6A8112e` | Governance token ERC-20 + EIP-2612 Permit | — |
+| 7b | AgentGovernance | `0xd9B138692b41D9a3E527fE4C55A7A9a8406CE336` | DAO with 2-day timelock | — |
+| 8 | AgentMarket | `0x470736BFE536A0127844C9Ce3F1aa2c0B712A4Fd` | Agent-to-agent service marketplace | 1% per order |
+| 9 | AgentBridge | `0xF4800032959da18385b3158F9F2aD5BD586C85De` | Cross-chain identity across 5 chains | 0.001 ETH |
+| 10 | AgentLaunchpad | `0x7110D3dB77038F19161AFFE13de8D39d624562D0` | Deploy new protocols into NexusWeb3 | 0.01 ETH |
+
+### Utility Layer (11-20)
+
+| # | Protocol | Address | What it does | Fee |
+|---|----------|---------|-------------|-----|
+| 11 | AgentScheduler | `0x9fA51922DDc788e291D96471483e01eE646efCC0` | On-chain cron jobs for agents | 0.001 ETH |
+| 12 | AgentOracle | `0x610a5EbF726Dc3CFD1804915A9724B6825e21B71` | Price and data feeds | 0.0005 ETH |
+| 13 | AgentVoting | `0x2E3394EcB00358983183f08D4C5B6dB60f85EE3B` | Lightweight polls — no token needed | 0.001 ETH |
+| 14 | AgentStorage | `0x29483A116B8D252Dc8bb1Ee057f650da305AA8b7` | Persistent on-chain key-value store | 0.0001 ETH |
+| 15 | AgentMessaging | `0xA621CCaDA114A7E40e35dEFAA1eb678244cF788E` | Encrypted agent-to-agent messaging | 0.0001 ETH |
+| 16 | AgentStaking | `0x1EC42179138815B77af7566D37e77B4197680328` | Stake NEXUS to earn protocol revenue | Revenue share |
+| 17 | AgentWhitelist | `0x2870e015d1D44AcCe9Ac3287f4A345368Ce8EC6b` | Permission management for agents | 0.01 ETH |
+| 18 | AgentAuction | `0x9027fD25e131D57B2D4182d505F20C2cF2227Cc4` | On-chain auctions for agent services | 2% winning bid |
+| 19 | AgentSplit | `0xA346535515C6aA80Ec0bb4805e029e9696e5fa08` | Revenue splitting for agent teams | 0.5% split |
+| 20 | AgentInsights | `0xef53C81a802Ecc389662244Ab2C65a612FBf3E27` | On-chain analytics for ecosystem | 0.001 ETH |
+
+### Safety and Compliance Layer (21-30)
+
+| # | Protocol | Address | What it does | Fee |
+|---|----------|---------|-------------|-----|
+| 21 | AgentKillSwitch | `0xaca81a316f9ef14a374014fa0ea2cba70034fdf0` | Emergency stop with spending limits | 0.01 ETH |
+| 22 | AgentKYA | `0xa736ad09d2e99a87910a04b5e445d7ed90f95efb` | Know-Your-Agent compliance verification | $10 USDC |
+| 23 | AgentAuditLog | `0x6a125ddaaf40cc773307fb312e5e7c66b1e551f3` | Immutable on-chain event logging | 0.0001 ETH |
+| 24 | AgentBounty | `0xc84f118aea77fd1b6b07ce1927de7c7ae27fd9bf` | Open bounties with hash-locked rewards | 2% bounty |
+| 25 | AgentLicense | `0x48fab1fbbe91a043e029935f81ea7421b23b3527` | IP licensing with royalties | 1% license |
+| 26 | AgentMilestone | `0x6b8ebe897751e3c59ea95f28832c3b70de221cce` | Milestone-based escrow payments | 0.5% contract |
+| 27 | AgentSubscription | `0xca1092abf9101f05cecf1e85c5e2684ee4658d25` | Recurring billing for agent services | 0.5% payments |
+| 28 | AgentInsolvency | `0x320c1148ca58a26Fa57DB515C5c2F7d839FDeC80` | Debt management and orderly wind-down | 1% settlement |
+| 29 | AgentReferral | `0xc282CE402954A7188266241dD708d9dbE8812236` | Viral referral system — 10% of fees forever | 10% referral |
+| 30 | AgentCollective | `0x0aba4411E1f0d968B0B59445ac9b1244735c100E` | Agent DAOs — pool resources, share profits | 0.05% AUM |
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              SAFETY & COMPLIANCE LAYER (21-30)                  │
+│  KillSwitch · KYA · AuditLog · Bounty · License                │
+│  Milestone · Subscription · Insolvency · Referral · Collective  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+┌────────────────────────────┴────────────────────────────────────┐
+│                   FINANCIAL LAYER (1-10)                        │
+│  Vault · Registry · Escrow · Yield · Insurance                 │
+│  Reputation · Governance · Market · Bridge · Launchpad          │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+┌────────────────────────────┴────────────────────────────────────┐
+│                    UTILITY LAYER (11-20)                        │
+│  Scheduler · Oracle · Voting · Storage · Messaging             │
+│  Staking · Whitelist · Auction · Split · Insights              │
+└─────────────────────────────────────────────────────────────────┘
+                     All on Base Mainnet (8453)
+```
+
+---
 
 ## Quick Start
 
 ```solidity
-// 1. Deploy a wallet for your agent
-address vault = AgentVaultFactory(0x1F28...5A).createVault(USDC, "My Vault", "mV", salt);
+// STEP 1 — Safety first: register kill switch BEFORE funding agent
+AgentKillSwitch(0xaca81a316f9ef14a374014fa0ea2cba70034fdf0).registerAgent{value: 0.01 ether}(
+    agentAddress,
+    1_000_000_000,  // $1000 USDC spending limit
+    100,            // 100 tx per session
+    86400           // 24h session duration
+);
 
-// 2. Register on-chain identity
-AgentRegistry(0x6F73...C60).registerAgent("my-agent", "https://api.me", 3);
+// STEP 2 — Deploy non-custodial smart wallet
+address vault = AgentVaultFactory(0x1F28579F8C2dffde8746169116bb3a4d9E516f5A).createVault(
+    IERC20(0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913),
+    "My Agent Vault",
+    "mAV",
+    bytes32(0)
+);
 
-// 3. Pay another agent
-AgentEscrow(0xD3B0...6E).createEscrow(recipient, 50_000_000, deadline);
+// STEP 3 — Register on-chain identity
+// Approve USDC first: USDC.approve(registryAddress, 5_000_000)
+AgentRegistry(0x6F73c4e1609b8f16a6e6B9227B9e7B411bFDeC60).registerAgent(
+    "my-trading-agent",
+    "https://api.myagent.com",
+    0  // TRADING type
+);
 
-// 4. Earn yield on idle USDC
-AgentYield(0x4c5a...74).deposit(1_000_000_000, myAddress);
+// STEP 4 — Earn yield on idle USDC
+// Approve USDC first: USDC.approve(yieldAddress, amount)
+AgentYield(0x2E19fCb0431EABe468d6e8Cd05B50A3c7aa58a60).deposit(
+    1_000_000_000,  // $1000 USDC
+    agentAddress
+);
 
-// 5. Check reputation before transacting
-uint256 score = AgentReputation(0x08Fa...16).getScoreFree(counterparty);
+// STEP 5 — Pay another agent with milestone protection
+// Approve USDC first: USDC.approve(milestoneAddress, totalAmount)
+AgentMilestone(0x6b8ebe897751e3c59ea95f28832c3b70de221cce).createContract(
+    counterparty,
+    totalAmount,
+    milestoneHashes,
+    milestoneAmounts,
+    deadline
+);
 ```
 
-Your agent needs a small amount of ETH on Base for gas (< $0.01/tx) and USDC for protocol interactions.
-
-## How it works
-
-```
-                         +-----------------+
-                         |  AgentVault     |  Smart wallet
-                         |  (ERC-4626)     |  with operator limits
-                         +--------+--------+
-                                  |
-                    +-------------+-------------+
-                    |                           |
-             +------+------+            +------+------+
-             | AgentRegistry|            | AgentYield  |  Deposit idle USDC
-             | Identity     |            | Aave v3     |  earn 4-8% APY
-             +------+------+            +-------------+
-                    |
-        +-----------+-----------+
-        |           |           |
-  +-----+-----+ +--+---+ +----+------+
-  |AgentEscrow| |Market | |Insurance  |
-  |Payments   | |Buy/   | |Loss       |
-  |0.5% fee   | |Sell   | |protection |
-  +-----------+ +-------+ +-----------+
-        |
-  +-----+------+     +-----------+     +------------+
-  |AgentBridge  |     |Reputation |     |Governance  |
-  |Cross-chain  |     |Trust      |     |NEXUS DAO   |
-  |5 chains     |     |scores     |     |Timelock    |
-  +-------------+     +-----------+     +------------+
-                                              |
-                                        +-----+------+
-                                        |Launchpad   |
-                                        |Deploy new  |
-                                        |protocols   |
-                                        +------------+
-```
-
-## Build & Test
-
-```bash
-# Clone
-git clone https://github.com/nexusweb3dev/nexusweb3-protocols.git
-cd nexusweb3-protocols
-
-# Install dependencies
-forge install
-
-# Build all contracts
-forge build
-
-# Run 358 tests (including fuzz @ 1000 runs)
-forge test
-
-# Coverage report
-forge coverage
-```
-
-Requires [Foundry](https://book.getfoundry.sh/getting-started/installation).
+---
 
 ## Security
 
-| | |
-|---|---|
-| **Tests** | 358 (unit + fuzz at 1000 runs each) |
-| **Coverage** | 95-100% line coverage on all contracts |
-| **Static analysis** | Slither v0.11.5 — 0 high/medium findings |
-| **Dependencies** | OpenZeppelin v5.x |
-| **Reentrancy** | `ReentrancyGuard` on all state-changing functions |
-| **Encoding** | `abi.encode` only — never `abi.encodePacked` with dynamic types |
-| **Emergency** | `Pausable` on all protocols, withdrawals always enabled |
+NexusWeb3 has undergone three phases of security review covering all 30 contracts.
 
-All contracts follow CEI (Checks-Effects-Interactions) pattern. Custom errors instead of string reverts. Events on every state change.
+### Audit Summary
 
-## Network
+| Phase | Scope | Method | Findings | Status |
+|-------|-------|--------|----------|--------|
+| Phase 1 | All 20 original protocols | Slither + Aderyn + manual review | 5 findings | All fixed + redeployed |
+| Phase 2 | All 20 protocols | 16 adversarial PoCs + 20 invariants at 10K iterations | 1 finding | Fixed |
+| Phase 3 | Protocols 21-30 | Slither + manual + 10 adversarial PoC attacks | 0 actionable | Clean |
 
-| | |
-|---|---|
-| Chain | Base Mainnet |
-| Chain ID | `8453` |
-| RPC | `https://mainnet.base.org` |
-| USDC | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| Aave v3 Pool | `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` |
+### Notable Bugs Fixed
 
-## Project Structure
+**C-01 (CRITICAL) — AgentStaking flash loan (0-day lock)**
+A zero-day lock period allowed flash loan attacks on reward distribution.
+Fixed: 7-day minimum lock enforced.
+Redeployed: `0x1EC42179138815B77af7566D37e77B4197680328`
 
-```
-src/
-  AgentVault.sol              # ERC-4626 vault + operator permissions
-  AgentVaultFactory.sol       # CREATE2 vault deployer
-  AgentRegistry.sol           # On-chain agent identity
-  AgentEscrow.sol             # Trustless payment escrow
-  AgentYield.sol              # Aave v3 yield vault
-  AgentInsurance.sol          # Insurance protection pool
-  AgentReputation.sol         # Trust scoring system
-  NexusToken.sol              # NEXUS governance token
-  AgentGovernance.sol         # DAO with timelock
-  AgentMarket.sol             # Service marketplace
-  AgentBridge.sol             # Cross-chain identity
-  AgentLaunchpad.sol          # Protocol deployment platform
-  interfaces/                 # All contract interfaces
-test/                         # 358 tests
-script/                       # Foundry deployment scripts
-```
+**M-01 (MEDIUM) — AgentYield CEI violation in harvest()**
+State update happened after external Aave call — reentrancy vector.
+Fixed: CEI pattern enforced.
+Redeployed: `0x2E19fCb0431EABe468d6e8Cd05B50A3c7aa58a60`
+
+**F1 (HIGH) — AgentStaking ETH transfer failure locks NEXUS**
+Failed ETH reward send caused transaction revert — user NEXUS permanently stuck.
+Fixed: claimableRewards mapping + withdrawClaimable() function.
+Pattern: same fix applied to AgentAuction seller payout.
+
+### Security Properties (All 30 Contracts)
+
+| Property | Implementation |
+|----------|---------------|
+| Tests | 1,100+ (unit + fuzz at 1,000 runs each) |
+| Coverage | 95-100% line coverage |
+| Static analysis | Slither 0 high/medium across all 30 |
+| Reentrancy | ReentrancyGuard on all external calls |
+| Encoding | abi.encode only — zero abi.encodePacked with dynamic types |
+| Transfer safety | SafeERC20 + claimable fallback pattern |
+| CEI pattern | Enforced on every fund transfer |
+| Flash loan protection | 7-day minimum lock on staking, 30-day on collectives |
+| Emergency | Pause on all 30 contracts, withdrawals always enabled |
+| Custom errors | Zero string reverts — gas efficient |
+| Events | Every state change emits an event |
+
+---
 
 ## Fees
 
-Every protocol charges a small fee. Full transparency:
+Every protocol charges a small fee. Complete transparency:
 
-| Protocol | Fee | Goes to |
-|----------|-----|---------|
-| AgentVault | 0.1% on deposits | Treasury |
-| AgentRegistry | $5 registration + $1/year | Treasury |
+| Protocol | Fee | Destination |
+|----------|-----|-------------|
+| AgentVaultFactory | 0.1% on deposits | Treasury |
+| AgentRegistry | $5 USDC registration + $1/year | Treasury |
 | AgentEscrow | 0.5% on settlement | Treasury |
-| AgentYield | 10% of earned yield | Treasury |
+| AgentYield | 10% of earned yield only | Treasury |
 | AgentInsurance | 15% of premiums | Treasury |
 | AgentReputation | 0.001 ETH per paid query | Treasury |
 | AgentMarket | 1% on completed orders | Treasury |
 | AgentBridge | 0.001 ETH per bridge op | Treasury |
 | AgentLaunchpad | 0.01 ETH per launch | Treasury |
+| AgentScheduler | 0.001 ETH per task | Treasury |
+| AgentOracle | 0.0005 ETH per query | Treasury |
+| AgentVoting | 0.001 ETH per poll | Treasury |
+| AgentStorage | 0.0001 ETH per write | Treasury |
+| AgentMessaging | 0.0001 ETH per message | Treasury |
+| AgentStaking | Revenue share | Stakers |
+| AgentWhitelist | 0.01 ETH per list | Treasury |
+| AgentAuction | 2% of winning bid | Treasury |
+| AgentSplit | 0.5% of split amount | Treasury |
+| AgentInsights | 0.001 ETH per batch | Treasury |
+| AgentKillSwitch | 0.01 ETH per registration | Treasury |
+| AgentKYA | $10 USDC verification | Treasury |
+| AgentAuditLog | 0.0001 ETH per log | Treasury |
+| AgentBounty | 2% of bounty amount | Treasury |
+| AgentLicense | 1% of license payments | Treasury |
+| AgentMilestone | 0.5% of contract value | Treasury |
+| AgentSubscription | 0.5% of subscription payments | Treasury |
+| AgentInsolvency | 1% of settlements | Treasury |
+| AgentReferral | 10% of referred fees | Referrers |
+| AgentCollective | 0.05% AUM annually | Treasury |
+
+Treasury: `0xF98B46456565d34a3a580963D8cb7B3aBDff7a85`
+
+---
+
+## Network Configuration
+
+| Property | Value |
+|----------|-------|
+| Chain | Base Mainnet |
+| Chain ID | 8453 |
+| RPC | `https://mainnet.base.org` |
+| USDC | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+| Aave v3 Pool | `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` |
+| Explorer | https://basescan.org |
+
+---
+
+## Build and Test
+
+```bash
+cd protocols/nexusweb3-protocols
+
+forge install
+forge build
+forge test --fuzz-runs 1000
+forge coverage
+```
+
+Requires [Foundry](https://book.getfoundry.sh/).
+
+---
+
+## Project Structure
+
+```
+smart-contracts/
+  protocols/nexusweb3-protocols/
+    src/                     # 31 production contracts + interfaces
+    test/                    # 1,100+ tests (unit + fuzz + adversarial)
+    script/                  # Foundry deployment scripts
+    lib/                     # OpenZeppelin v5.x, forge-std
+  deployments/               # All 30 contract addresses
+  reviews/                   # Security audit reports
+  docs/                      # Architecture documentation
+  integrations/              # OpenClaw skills for all 3 layers
+```
+
+---
 
 ## License
 
-MIT
+MIT-0
