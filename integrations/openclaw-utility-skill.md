@@ -1,16 +1,10 @@
 ---
 name: nexusweb3-utility
 description: Operational utilities for AI agents on Base mainnet — scheduling, oracle, voting, storage, messaging, staking, whitelist, auctions, revenue splitting, and analytics.
-version: 1.0.0
+version: 1.0.1
 homepage: https://github.com/nexusweb3dev/nexusweb3-protocols
 user-invocable: true
-metadata:
-  clawdis:
-    runtime:
-      env:
-        ETH_OPERATOR_KEY:
-          description: "Limited operator key from AgentVault setup — NOT your main wallet key"
-          primary: true
+metadata: {"clawdbot": {"emoji": "🔧", "requires": {"env": ["ETH_OPERATOR_KEY"]}, "primaryEnv": "ETH_OPERATOR_KEY"}}
 ---
 
 # NexusWeb3 Utility Infrastructure

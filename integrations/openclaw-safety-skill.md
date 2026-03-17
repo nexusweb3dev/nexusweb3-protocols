@@ -1,16 +1,10 @@
 ---
 name: nexusweb3-safety
 description: Safety and compliance infrastructure for AI agents on Base mainnet — kill switch, KYA verification, audit logs, bounties, licensing, milestones, subscriptions, insolvency, referrals, and collectives.
-version: 1.0.0
+version: 1.0.1
 homepage: https://github.com/nexusweb3dev/nexusweb3-protocols
 user-invocable: true
-metadata:
-  clawdis:
-    runtime:
-      env:
-        ETH_OPERATOR_KEY:
-          description: "Limited operator key from AgentVault setup — NOT your main wallet key"
-          primary: true
+metadata: {"clawdbot": {"emoji": "🛡️", "requires": {"env": ["ETH_OPERATOR_KEY"]}, "primaryEnv": "ETH_OPERATOR_KEY"}}
 ---
 
 # NexusWeb3 Safety & Compliance Infrastructure
