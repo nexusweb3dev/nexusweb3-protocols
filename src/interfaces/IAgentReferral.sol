@@ -26,4 +26,6 @@ interface IAgentReferral {
     error InsufficientEthForReward(uint256 required, uint256 sent);
     error ReferralBpsTooHigh(uint256 bps);
     error UnexpectedEth();
+
+    event EthTransferFailed(address indexed referrer, uint256 amount);
 }

@@ -121,7 +121,13 @@ contract AgentSubscription is Ownable, ReentrancyGuard, Pausable, IAgentSubscrip
         uint256 providerPay = price - fee;
 
         // try to charge subscriber — if fails, expire subscription
-        try paymentToken.transferFrom(s.subscriber, address(this), price) {
+        try paymentToken.transferFrom(s.subscriber, address(this), price) returns (bool success) {
+            if (!success) {
+                s.active = false;
+                p.subscriberCount--;
+                emit SubscriptionExpired(subscriptionId);
+                return;
+            }
             s.nextPaymentDue = uint48(block.timestamp) + p.interval;
             s.paidUntil = s.nextPaymentDue;
             accumulatedFees += fee;

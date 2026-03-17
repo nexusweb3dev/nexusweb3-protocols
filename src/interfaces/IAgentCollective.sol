@@ -52,4 +52,7 @@ interface IAgentCollective {
     error ProposalExpired(uint256 collectiveId, uint256 proposalId);
     error AlreadyVoted(uint256 collectiveId, uint256 proposalId, address voter);
     error ProposalDeadlineTooSoon();
+    error NoPendingDistribution(uint256 id, address member);
+
+    event DistributionClaimed(uint256 indexed id, address indexed member, uint256 amount);
 }

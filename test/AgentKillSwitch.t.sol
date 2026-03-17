@@ -24,6 +24,10 @@ contract AgentKillSwitchTest is Test {
         ks = new AgentKillSwitch(treasury, owner, REG_FEE);
         vm.deal(agentOwner, 10 ether);
         vm.deal(agent, 1 ether);
+
+        // authorize this test contract as a protocol caller
+        vm.prank(owner);
+        ks.authorizeProtocol(address(this));
     }
 
     function _register() internal {
@@ -406,5 +410,43 @@ contract AgentKillSwitchTest is Test {
         vm.prank(agentOwner);
         ks.killSwitch(agent);
         assertFalse(ks.isActive(agent));
+    }
+
+    // ─── F-1 Fix: Unauthorized callers blocked ──────────────────────────
+
+    function test_revert_unauthorizedCheckAndDecrementTx() public {
+        _register();
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(IAgentKillSwitch.NotAuthorizedProtocol.selector, stranger));
+        ks.checkAndDecrementTx(agent);
+    }
+
+    function test_revert_unauthorizedCheckAndDecrementSpending() public {
+        _register();
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(IAgentKillSwitch.NotAuthorizedProtocol.selector, stranger));
+        ks.checkAndDecrementSpending(agent, 100);
+    }
+
+    function test_authorizeAndRevokeProtocol() public {
+        address proto = makeAddr("protocol");
+
+        vm.prank(owner);
+        ks.authorizeProtocol(proto);
+        assertTrue(ks.isAuthorizedProtocol(proto));
+
+        _register();
+
+        vm.prank(proto);
+        ks.checkAndDecrementTx(agent); // works when authorized
+
+        vm.prank(owner);
+        ks.revokeProtocol(proto);
+
+        vm.prank(proto);
+        vm.expectRevert(abi.encodeWithSelector(IAgentKillSwitch.NotAuthorizedProtocol.selector, proto));
+        ks.checkAndDecrementTx(agent); // fails after revocation
     }
 }

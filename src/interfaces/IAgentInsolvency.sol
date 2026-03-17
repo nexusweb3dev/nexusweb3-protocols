@@ -48,4 +48,5 @@ interface IAgentInsolvency {
     error FeeTooHigh(uint256 bps);
     error NoFeesToCollect();
     error NoPendingClaims(address agent);
+    error TooManyDebts(address agent);
 }

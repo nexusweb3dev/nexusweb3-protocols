@@ -16,6 +16,7 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
 
     uint256 public constant MAX_FEE_BPS = 1000;
     uint256 public constant BPS = 10_000;
+    uint256 public constant MAX_DEBTS_PER_AGENT = 100;
 
     IERC20 public immutable paymentToken;
 
@@ -64,6 +65,7 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
         if (bytes(description).length == 0) revert EmptyDescription();
         if (msg.value < registrationFee) revert InsufficientFee(registrationFee, msg.value);
         if (_isInsolvent[msg.sender]) revert AlreadyInsolvent(msg.sender);
+        if (_debtorDebts[msg.sender].length >= MAX_DEBTS_PER_AGENT) revert TooManyDebts(msg.sender);
 
         debtId = debtCount++;
         _debts[debtId] = Debt({

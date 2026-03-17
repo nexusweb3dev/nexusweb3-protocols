@@ -116,15 +116,20 @@ contract AgentReferral is Ownable, ReentrancyGuard, Pausable, IAgentReferral {
         uint256 usdcAmt = _pendingUsdc[referrer];
         if (ethAmt == 0 && usdcAmt == 0) revert NoPendingRewards(referrer);
 
-        _pendingEth[referrer] = 0;
         _pendingUsdc[referrer] = 0;
-        _claimedEth[referrer] += ethAmt;
         _claimedUsdc[referrer] += usdcAmt;
 
         if (ethAmt > 0) {
+            _pendingEth[referrer] = 0;
             (bool ok,) = referrer.call{value: ethAmt}("");
-            require(ok, "ETH transfer failed");
+            if (ok) {
+                _claimedEth[referrer] += ethAmt;
+            } else {
+                _pendingEth[referrer] = ethAmt;
+                emit EthTransferFailed(referrer, ethAmt);
+            }
         }
+
         if (usdcAmt > 0) {
             paymentToken.safeTransfer(referrer, usdcAmt);
         }

@@ -310,16 +310,19 @@ contract AgentCollectiveTest is Test {
 
         vm.warp(block.timestamp + 7 days + 1);
 
-        uint256 aliceBefore = usdc.balanceOf(alice);
-        uint256 bobBefore = usdc.balanceOf(bob);
-
         collective.distributeProfit(id);
 
-        // both members get equal share
-        uint256 aliceGot = usdc.balanceOf(alice) - aliceBefore;
-        uint256 bobGot = usdc.balanceOf(bob) - bobBefore;
-        assertEq(aliceGot, bobGot);
-        assertGt(aliceGot, 0);
+        // rewards are pending, not yet sent
+        uint256 alicePending = collective.getPendingDistribution(id, alice);
+        uint256 bobPending = collective.getPendingDistribution(id, bob);
+        assertEq(alicePending, bobPending);
+        assertGt(alicePending, 0);
+
+        // claim
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        collective.claimDistribution(id);
+        assertEq(usdc.balanceOf(alice) - aliceBefore, alicePending);
     }
 
     function test_distributeProfit_anyoneCanCall() public {
@@ -658,15 +661,12 @@ contract AgentCollectiveTest is Test {
 
         vm.warp(block.timestamp + 7 days + 1);
 
-        uint256 aliceBefore = usdc.balanceOf(alice);
-        uint256 bobBefore = usdc.balanceOf(bob);
-
         collective.distributeProfit(id);
 
-        // both get equal share
-        uint256 aliceGot = usdc.balanceOf(alice) - aliceBefore;
-        uint256 bobGot = usdc.balanceOf(bob) - bobBefore;
-        assertEq(aliceGot, bobGot);
+        // both get equal pending share
+        uint256 alicePending = collective.getPendingDistribution(id, alice);
+        uint256 bobPending = collective.getPendingDistribution(id, bob);
+        assertEq(alicePending, bobPending);
     }
 
     function testFuzz_leaveBeforeLock_getsNothing(uint256 elapsed) public {
@@ -683,5 +683,37 @@ contract AgentCollectiveTest is Test {
         collective.leaveCollective(id);
 
         assertEq(usdc.balanceOf(alice), aliceBefore); // no payout
+    }
+
+    // ─── F-2 Fix: Pull-based distribution ───────────────────────────────
+
+    function test_claimDistribution() public {
+        uint256 id = _createDefault();
+        _join(alice, id);
+
+        vm.prank(alice);
+        collective.depositRevenue(id, 1_000_000_000);
+
+        vm.warp(block.timestamp + 7 days + 1);
+        collective.distributeProfit(id);
+
+        uint256 pending = collective.getPendingDistribution(id, alice);
+        assertGt(pending, 0);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        collective.claimDistribution(id);
+
+        assertEq(usdc.balanceOf(alice) - aliceBefore, pending);
+        assertEq(collective.getPendingDistribution(id, alice), 0);
+    }
+
+    function test_revert_claimDistributionNothing() public {
+        uint256 id = _createDefault();
+        _join(alice, id);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(IAgentCollective.NoPendingDistribution.selector, id, alice));
+        collective.claimDistribution(id);
     }
 }

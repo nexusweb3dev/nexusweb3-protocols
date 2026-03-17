@@ -16,6 +16,7 @@ contract AgentKillSwitch is Ownable, ReentrancyGuard, Pausable, IAgentKillSwitch
     mapping(address => bool) private _registered;
     mapping(address => address) private _emergencyMultisig;
     mapping(address => KillEvent[]) private _killHistory;
+    mapping(address => bool) private _authorizedProtocol;
 
     constructor(address treasury_, address owner_, uint256 registrationFee_) Ownable(owner_) {
         if (treasury_ == address(0)) revert ZeroAddress();
@@ -135,8 +136,9 @@ contract AgentKillSwitch is Ownable, ReentrancyGuard, Pausable, IAgentKillSwitch
 
     // ─── Protocol Integration (called by other contracts) ───────────────
 
-    /// @notice Check agent is active and decrement tx counter. Reverts if not allowed.
+    /// @notice Check agent is active and decrement tx counter. Only authorized protocols.
     function checkAndDecrementTx(address agent) external {
+        if (!_authorizedProtocol[msg.sender]) revert NotAuthorizedProtocol(msg.sender);
         if (!_registered[agent]) revert AgentNotRegistered(agent);
         AgentConfig storage c = _agents[agent];
         if (!c.active) revert AgentIsKilled(agent);
@@ -152,8 +154,9 @@ contract AgentKillSwitch is Ownable, ReentrancyGuard, Pausable, IAgentKillSwitch
         c.txCount++;
     }
 
-    /// @notice Check agent spending and record usage. Reverts if over limit.
+    /// @notice Check agent spending and record usage. Only authorized protocols.
     function checkAndDecrementSpending(address agent, uint256 amount) external {
+        if (!_authorizedProtocol[msg.sender]) revert NotAuthorizedProtocol(msg.sender);
         if (!_registered[agent]) revert AgentNotRegistered(agent);
         AgentConfig storage c = _agents[agent];
         if (!c.active) revert AgentIsKilled(agent);
@@ -192,6 +195,21 @@ contract AgentKillSwitch is Ownable, ReentrancyGuard, Pausable, IAgentKillSwitch
         address old = treasury;
         treasury = newTreasury;
         emit TreasuryUpdated(old, newTreasury);
+    }
+
+    function authorizeProtocol(address protocol) external onlyOwner {
+        if (protocol == address(0)) revert ZeroAddress();
+        _authorizedProtocol[protocol] = true;
+        emit ProtocolAuthorized(protocol);
+    }
+
+    function revokeProtocol(address protocol) external onlyOwner {
+        _authorizedProtocol[protocol] = false;
+        emit ProtocolRevoked(protocol);
+    }
+
+    function isAuthorizedProtocol(address protocol) external view returns (bool) {
+        return _authorizedProtocol[protocol];
     }
 
     function pause() external onlyOwner { _pause(); }

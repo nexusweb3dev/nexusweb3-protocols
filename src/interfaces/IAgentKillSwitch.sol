@@ -44,4 +44,8 @@ interface IAgentKillSwitch {
     error InvalidConfig();
     error ZeroAddress();
     error NoFeesToCollect();
+    error NotAuthorizedProtocol(address caller);
+
+    event ProtocolAuthorized(address indexed protocol);
+    event ProtocolRevoked(address indexed protocol);
 }

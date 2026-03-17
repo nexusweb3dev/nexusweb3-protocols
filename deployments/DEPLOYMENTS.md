@@ -41,16 +41,16 @@
 
 | # | Contract | Address | Version | Fee | Tests | Audit |
 |---|----------|---------|---------|-----|-------|-------|
-| 21 | AgentKillSwitch | `0xaca81a316f9ef14a374014fa0ea2cba70034fdf0` | v1.0.0 | 0.01 ETH/reg | 28 | PASS |
+| 21 | AgentKillSwitch | `0xaf87912e1ccB501a22a3bDDe6c38Cb0CA31C4E96` | v1.0.1 | 0.01 ETH/reg | 31 | PASS |
 | 22 | AgentKYA | `0xa736ad09d2e99a87910a04b5e445d7ed90f95efb` | v1.0.0 | $10 USDC | 24 | PASS |
 | 23 | AgentAuditLog | `0x6a125ddaaf40cc773307fb312e5e7c66b1e551f3` | v1.0.0 | 0.0001 ETH/log | 22 | PASS |
 | 24 | AgentBounty | `0xc84f118aea77fd1b6b07ce1927de7c7ae27fd9bf` | v1.0.0 | 2% of bounty | 30 | PASS |
 | 25 | AgentLicense | `0x48fab1fbbe91a043e029935f81ea7421b23b3527` | v1.0.0 | 1% of license | 26 | PASS |
 | 26 | AgentMilestone | `0x6b8ebe897751e3c59ea95f28832c3b70de221cce` | v1.0.0 | 0.5% contract | 34 | PASS |
-| 27 | AgentSubscription | `0xca1092abf9101f05cecf1e85c5e2684ee4658d25` | v1.0.0 | 0.5% payments | 28 | PASS |
-| 28 | AgentInsolvency | `0x320c1148ca58a26Fa57DB515C5c2F7d839FDeC80` | v1.0.0 | 1% settlements | 72 | PASS |
-| 29 | AgentReferral | `0xc282CE402954A7188266241dD708d9dbE8812236` | v1.0.0 | 10% referral | 49 | PASS |
-| 30 | AgentCollective | `0x0aba4411E1f0d968B0B59445ac9b1244735c100E` | v1.0.0 | 0.05% AUM | 50 | PASS |
+| 27 | AgentSubscription | `0xfcbc6fe1bb570b6b68dfdfcb34f37383e865858e` | v1.0.1 | 0.5% payments | 28 | PASS |
+| 28 | AgentInsolvency | `0xfe6a69e563f90f806babd71282f313c93544ea3f` | v1.0.1 | 1% settlements | 72 | PASS |
+| 29 | AgentReferral | `0x46ea1eff221120c8ac9aebe1c1871b317e27cfe4` | v1.0.1 | 10% referral | 49 | PASS |
+| 30 | AgentCollective | `0x2c5d55a49fa2ed03212b5fe5971ba219bab9d953` | v1.0.1 | 0.05% AUM | 52 | PASS |
 
 ## Deployment Timeline
 
@@ -61,6 +61,7 @@
 - **2026-03-17:** AgentStaking v1.0.2 redeployed (C-01 flash loan fix)
 - **2026-03-17:** AgentAuction v1.0.1 redeployed (claimable payout fix)
 - **2026-03-17:** AgentInsolvency, AgentReferral, AgentCollective (28-30) deployed
+- **2026-03-17:** Phase 3 audit fixes — 5 contracts redeployed (KillSwitch, Subscription, Insolvency, Referral, Collective)
 
 ## Security Summary
 

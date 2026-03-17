@@ -42,6 +42,7 @@ contract AgentCollective is ERC1155, Ownable, ReentrancyGuard, Pausable, IAgentC
     mapping(uint256 => mapping(uint256 => Proposal)) private _proposals;
     mapping(uint256 => uint256) private _proposalCount;
     mapping(uint256 => mapping(uint256 => mapping(address => bool))) private _voted;
+    mapping(uint256 => mapping(address => uint256)) private _pendingDistribution;
 
     constructor(
         IERC20 paymentToken_,
@@ -179,10 +180,20 @@ contract AgentCollective is ERC1155, Ownable, ReentrancyGuard, Pausable, IAgentC
 
         address[] storage members = _members[id];
         for (uint256 i; i < members.length; i++) {
-            paymentToken.safeTransfer(members[i], perMember);
+            _pendingDistribution[id][members[i]] += perMember;
         }
 
         emit ProfitDistributed(id, totalPaid, perMember);
+    }
+
+    function claimDistribution(uint256 id) external nonReentrant {
+        uint256 amount = _pendingDistribution[id][msg.sender];
+        if (amount == 0) revert NoPendingDistribution(id, msg.sender);
+
+        _pendingDistribution[id][msg.sender] = 0;
+        paymentToken.safeTransfer(msg.sender, amount);
+
+        emit DistributionClaimed(id, msg.sender, amount);
     }
 
     // ─── Voting ─────────────────────────────────────────────────────────
@@ -309,6 +320,10 @@ contract AgentCollective is ERC1155, Ownable, ReentrancyGuard, Pausable, IAgentC
 
     function getProposalCount(uint256 id) external view returns (uint256) {
         return _proposalCount[id];
+    }
+
+    function getPendingDistribution(uint256 id, address member) external view returns (uint256) {
+        return _pendingDistribution[id][member];
     }
 
     function hasVotedOnProposal(uint256 id, uint256 proposalId, address voter) external view returns (bool) {
