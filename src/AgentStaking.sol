@@ -20,13 +20,14 @@ contract AgentStaking is Ownable, ReentrancyGuard, Pausable, IAgentStaking {
     address public treasury;
     uint256 public stakeCount;
     uint256 public totalWeightedStake;
-    uint256 public accRewardPerShare; // accumulated reward per weighted share (scaled by PRECISION)
+    uint256 public accRewardPerShare;
     uint256 public pendingRevenue;
 
     mapping(uint256 => StakeInfo) private _stakes;
     mapping(address => uint256[]) private _userStakes;
     mapping(address => bool) private _authorizedProtocols;
-    mapping(uint256 => uint256) private _boostForLockDays; // lockDays => boost bps (10000 = 1x)
+    mapping(uint256 => uint256) private _boostForLockDays;
+    mapping(address => uint256) public claimableRewards; // F1 fix: fallback for failed ETH sends
 
     constructor(IERC20 nexusToken_, address treasury_, address owner_) Ownable(owner_) {
         if (address(nexusToken_) == address(0)) revert ZeroAddress();
@@ -85,13 +86,18 @@ contract AgentStaking is Ownable, ReentrancyGuard, Pausable, IAgentStaking {
 
         uint256 pending = _pendingReward(s);
         s.active = false;
+        s.rewardDebt = 0;
         totalWeightedStake -= s.weightedAmount;
 
+        // CRITICAL: return NEXUS first — this must NEVER be blocked
         nexusToken.safeTransfer(msg.sender, s.amount);
 
+        // ETH rewards: try to send, store in claimable if it fails
         if (pending > 0) {
             (bool ok,) = msg.sender.call{value: pending}("");
-            require(ok, "Reward transfer failed");
+            if (!ok) {
+                claimableRewards[msg.sender] += pending;
+            }
         }
 
         emit Unstaked(stakeId, msg.sender, s.amount, pending);
@@ -111,9 +117,20 @@ contract AgentStaking is Ownable, ReentrancyGuard, Pausable, IAgentStaking {
         s.rewardDebt = s.weightedAmount * accRewardPerShare / PRECISION;
 
         (bool ok,) = msg.sender.call{value: pending}("");
-        require(ok, "Reward transfer failed");
+        if (!ok) {
+            claimableRewards[msg.sender] += pending;
+        }
 
         emit RewardsClaimed(stakeId, msg.sender, pending);
+    }
+
+    /// @notice Withdraw ETH rewards that failed to send directly.
+    function withdrawClaimable() external nonReentrant {
+        uint256 amount = claimableRewards[msg.sender];
+        if (amount == 0) revert NothingToClaim(0);
+        claimableRewards[msg.sender] = 0;
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok, "Withdraw failed");
     }
 
     // ─── Revenue Distribution ───────────────────────────────────────────
@@ -131,9 +148,12 @@ contract AgentStaking is Ownable, ReentrancyGuard, Pausable, IAgentStaking {
         // update accumulated reward per share
         accRewardPerShare += stakerShare * PRECISION / totalWeightedStake;
 
+        // treasury gets its share — failure must not block staker rewards
         if (treasuryShare > 0) {
             (bool ok,) = treasury.call{value: treasuryShare}("");
-            require(ok, "Treasury transfer failed");
+            if (!ok) {
+                claimableRewards[treasury] += treasuryShare;
+            }
         }
 
         emit RevenueDistributed(revenue, totalWeightedStake);
@@ -150,9 +170,10 @@ contract AgentStaking is Ownable, ReentrancyGuard, Pausable, IAgentStaking {
         emit RevenueReceived(msg.sender, msg.value);
     }
 
-    // Allow direct ETH receives (from fee collection)
+    // Accept ETH from any source — becomes staker revenue
     receive() external payable {
         pendingRevenue += msg.value;
+        emit RevenueReceived(msg.sender, msg.value);
     }
 
     // ─── Admin ──────────────────────────────────────────────────────────

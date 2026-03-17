@@ -148,7 +148,11 @@ contract AgentAuction is Ownable, ReentrancyGuard, Pausable, IAgentAuction {
         if (fee > 0) {
             accumulatedUsdcFees += fee;
         }
-        paymentToken.safeTransfer(a.seller, payout);
+
+        // seller payout — if transfer fails, store in claimable (never block settlement)
+        try this.safeRefund(a.seller, payout) {} catch {
+            _claimable[a.seller] += payout;
+        }
 
         emit AuctionSettled(auctionId, a.highestBidder, payout, fee);
     }
