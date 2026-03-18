@@ -10,7 +10,7 @@
 
 | # | Contract | Address | Version | Fee | Tests | Audit |
 |---|----------|---------|---------|-----|-------|-------|
-| 1 | AgentVaultFactory | `0x1F28579F8C2dffde8746169116bb3a4d9E516f5A` | v1.0.0 | 0.1% deposit | 32 | PASS |
+| 1 | AgentVaultFactory | `0x190474472bf3534A73c76CB50D105CC2F35D2ccb` | v1.0.1 | 0.1% deposit | 32 | PASS |
 | 2 | AgentRegistry | `0x6F73c4e1609b8f16a6e6B9227B9e7B411bFDeC60` | v1.0.0 | $5 reg + $1/yr | 28 | PASS |
 | 3 | AgentEscrow | `0xD3B07218A58cC75F0e47cbB237D7727970028a6E` | v1.0.0 | 0.5% settlement | 34 | PASS |
 | 4 | AgentYield | `0x2E19fCb0431EABe468d6e8Cd05B50A3c7aa58a60` | v1.0.1 | 10% of yield | 26 | PASS |
@@ -41,16 +41,16 @@
 
 | # | Contract | Address | Version | Fee | Tests | Audit |
 |---|----------|---------|---------|-----|-------|-------|
-| 21 | AgentKillSwitch | `0xaf87912e1ccB501a22a3bDDe6c38Cb0CA31C4E96` | v1.0.1 | 0.01 ETH/reg | 31 | PASS |
+| 21 | AgentKillSwitch | `0x2Bf370a377dBfD45EDF36d1ede218D4fd2071eb1` | v1.1.0 | 0.01 ETH/reg | 31 | PASS |
 | 22 | AgentKYA | `0xa736ad09d2e99a87910a04b5e445d7ed90f95efb` | v1.0.0 | $10 USDC | 24 | PASS |
 | 23 | AgentAuditLog | `0x6a125ddaaf40cc773307fb312e5e7c66b1e551f3` | v1.0.0 | 0.0001 ETH/log | 22 | PASS |
 | 24 | AgentBounty | `0xc84f118aea77fd1b6b07ce1927de7c7ae27fd9bf` | v1.0.0 | 2% of bounty | 30 | PASS |
 | 25 | AgentLicense | `0x48fab1fbbe91a043e029935f81ea7421b23b3527` | v1.0.0 | 1% of license | 26 | PASS |
 | 26 | AgentMilestone | `0x6b8ebe897751e3c59ea95f28832c3b70de221cce` | v1.0.0 | 0.5% contract | 34 | PASS |
-| 27 | AgentSubscription | `0xfcbc6fe1bb570b6b68dfdfcb34f37383e865858e` | v1.0.1 | 0.5% payments | 28 | PASS |
-| 28 | AgentInsolvency | `0xfe6a69e563f90f806babd71282f313c93544ea3f` | v1.0.1 | 1% settlements | 72 | PASS |
-| 29 | AgentReferral | `0x46ea1eff221120c8ac9aebe1c1871b317e27cfe4` | v1.0.1 | 10% referral | 49 | PASS |
-| 30 | AgentCollective | `0x2c5d55a49fa2ed03212b5fe5971ba219bab9d953` | v1.0.1 | 0.05% AUM | 52 | PASS |
+| 27 | AgentSubscription | `0x6E7350598d12809ccc98985440aEcb09CE728bbf` | v1.1.0 | 0.5% payments | 28 | PASS |
+| 28 | AgentInsolvency | `0x3e511326E22d291f2A3c5516b09318a34DC01152` | v1.1.0 | 1% settlements | 72 | PASS |
+| 29 | AgentReferral | `0xc7774DEBC022Eb5A1cE619F612e85AD40bd6D9A7` | v1.1.0 | 10% referral | 49 | PASS |
+| 30 | AgentCollective | `0xd7Be25591ad1eb21d9e84c0B2daC757EfD413a16` | v1.1.0 | 0.05% AUM | 52 | PASS |
 
 ## Deployment Timeline
 
@@ -62,6 +62,9 @@
 - **2026-03-17:** AgentAuction v1.0.1 redeployed (claimable payout fix)
 - **2026-03-17:** AgentInsolvency, AgentReferral, AgentCollective (28-30) deployed
 - **2026-03-17:** Phase 3 audit fixes — 5 contracts redeployed (KillSwitch, Subscription, Insolvency, Referral, Collective)
+- **2026-03-18:** AgentVaultFactory v1.0.1 redeployed (bytecode metadata fix, Basescan verified)
+- **2026-03-18:** 5 safety contracts v1.1.0 redeployed with security patches + Basescan verified
+- **2026-03-18:** All 31 contracts verified on Basescan — zero known vulnerabilities
 
 ## Security Summary
 

@@ -19,7 +19,7 @@ clawhub install nexusweb3
 ## Source
 
 - Contracts: https://github.com/nexusweb3dev/nexusweb3-protocols
-- Explorer: https://basescan.org/address/0x1F28579F8C2dffde8746169116bb3a4d9E516f5A
+- Explorer: https://basescan.org/address/0x190474472bf3534A73c76CB50D105CC2F35D2ccb
 
 ## Security
 

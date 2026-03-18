@@ -22,7 +22,7 @@ NexusWeb3 is 30 composable smart contracts built for exactly this. Three layers:
 
 | # | Protocol | Address | What it does | Fee |
 |---|----------|---------|-------------|-----|
-| 1 | AgentVaultFactory | `0x1F28579F8C2dffde8746169116bb3a4d9E516f5A` | Non-custodial smart wallet with operator spending limits | 0.1% deposit |
+| 1 | AgentVaultFactory | `0x190474472bf3534A73c76CB50D105CC2F35D2ccb` | Non-custodial smart wallet with operator spending limits | 0.1% deposit |
 | 2 | AgentRegistry | `0x6F73c4e1609b8f16a6e6B9227B9e7B411bFDeC60` | Permanent on-chain identity for AI agents | $5 USDC |
 | 3 | AgentEscrow | `0xD3B07218A58cC75F0e47cbB237D7727970028a6E` | Trustless payments between agents | 0.5% settlement |
 | 4 | AgentYield | `0x2E19fCb0431EABe468d6e8Cd05B50A3c7aa58a60` | Automated yield on idle USDC via Aave v3 | 10% of yield |
@@ -53,16 +53,16 @@ NexusWeb3 is 30 composable smart contracts built for exactly this. Three layers:
 
 | # | Protocol | Address | What it does | Fee |
 |---|----------|---------|-------------|-----|
-| 21 | AgentKillSwitch | `0xaca81a316f9ef14a374014fa0ea2cba70034fdf0` | Emergency stop with spending limits | 0.01 ETH |
+| 21 | AgentKillSwitch | `0x2Bf370a377dBfD45EDF36d1ede218D4fd2071eb1` | Emergency stop with spending limits | 0.01 ETH |
 | 22 | AgentKYA | `0xa736ad09d2e99a87910a04b5e445d7ed90f95efb` | Know-Your-Agent compliance verification | $10 USDC |
 | 23 | AgentAuditLog | `0x6a125ddaaf40cc773307fb312e5e7c66b1e551f3` | Immutable on-chain event logging | 0.0001 ETH |
 | 24 | AgentBounty | `0xc84f118aea77fd1b6b07ce1927de7c7ae27fd9bf` | Open bounties with hash-locked rewards | 2% bounty |
 | 25 | AgentLicense | `0x48fab1fbbe91a043e029935f81ea7421b23b3527` | IP licensing with royalties | 1% license |
 | 26 | AgentMilestone | `0x6b8ebe897751e3c59ea95f28832c3b70de221cce` | Milestone-based escrow payments | 0.5% contract |
-| 27 | AgentSubscription | `0xca1092abf9101f05cecf1e85c5e2684ee4658d25` | Recurring billing for agent services | 0.5% payments |
-| 28 | AgentInsolvency | `0x320c1148ca58a26Fa57DB515C5c2F7d839FDeC80` | Debt management and orderly wind-down | 1% settlement |
-| 29 | AgentReferral | `0xc282CE402954A7188266241dD708d9dbE8812236` | Viral referral system — 10% of fees forever | 10% referral |
-| 30 | AgentCollective | `0x0aba4411E1f0d968B0B59445ac9b1244735c100E` | Agent DAOs — pool resources, share profits | 0.05% AUM |
+| 27 | AgentSubscription | `0x6E7350598d12809ccc98985440aEcb09CE728bbf` | Recurring billing for agent services | 0.5% payments |
+| 28 | AgentInsolvency | `0x3e511326E22d291f2A3c5516b09318a34DC01152` | Debt management and orderly wind-down | 1% settlement |
+| 29 | AgentReferral | `0xc7774DEBC022Eb5A1cE619F612e85AD40bd6D9A7` | Viral referral system — 10% of fees forever | 10% referral |
+| 30 | AgentCollective | `0xd7Be25591ad1eb21d9e84c0B2daC757EfD413a16` | Agent DAOs — pool resources, share profits | 0.05% AUM |
 
 ---
 
@@ -95,7 +95,7 @@ NexusWeb3 is 30 composable smart contracts built for exactly this. Three layers:
 
 ```solidity
 // STEP 1 — Safety first: register kill switch BEFORE funding agent
-AgentKillSwitch(0xaca81a316f9ef14a374014fa0ea2cba70034fdf0).registerAgent{value: 0.01 ether}(
+AgentKillSwitch(0x2Bf370a377dBfD45EDF36d1ede218D4fd2071eb1).registerAgent{value: 0.01 ether}(
     agentAddress,
     1_000_000_000,  // $1000 USDC spending limit
     100,            // 100 tx per session
@@ -103,7 +103,7 @@ AgentKillSwitch(0xaca81a316f9ef14a374014fa0ea2cba70034fdf0).registerAgent{value:
 );
 
 // STEP 2 — Deploy non-custodial smart wallet
-address vault = AgentVaultFactory(0x1F28579F8C2dffde8746169116bb3a4d9E516f5A).createVault(
+address vault = AgentVaultFactory(0x190474472bf3534A73c76CB50D105CC2F35D2ccb).createVault(
     IERC20(0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913),
     "My Agent Vault",
     "mAV",

@@ -34,7 +34,7 @@ For write operations (registering agents, submitting KYA, posting bounties), use
 
 Instant, permanent permission revocation for AI agents with hard spending limits, transaction caps, session windows, and an optional emergency multisig co-controller.
 
-**Contract:** `0xaca81a316f9ef14a374014fa0ea2cba70034fdf0`
+**Contract:** `0x2Bf370a377dBfD45EDF36d1ede218D4fd2071eb1`
 
 **Register an agent with limits:**
 ```solidity
@@ -265,7 +265,7 @@ AgentMilestone.cancelContract(contractId)         // full refund if no milestone
 
 Stripe-style recurring subscriptions between AI agents. Providers create plans; subscribers pay upfront for 1-12 periods. Keepers trigger renewals on-chain.
 
-**Contract:** `0xca1092abf9101f05cecf1e85c5e2684ee4658d25`
+**Contract:** `0x6E7350598d12809ccc98985440aEcb09CE728bbf`
 
 **Create a subscription plan (provider):**
 ```solidity
@@ -303,7 +303,7 @@ bool active = AgentSubscription.isActive(subscriptionId)
 
 Structured debt registry and orderly insolvency for AI agent treasuries. Register obligations, confirm them bilaterally, repay over time, or declare insolvency for proportional creditor payouts.
 
-**Contract:** `0x320c1148ca58a26Fa57DB515C5c2F7d839FDeC80`
+**Contract:** `0x3e511326E22d291f2A3c5516b09318a34DC01152`
 
 **Register a debt obligation (debtor pays ETH registration fee):**
 ```solidity
@@ -346,7 +346,7 @@ SolvencyStatus memory s = AgentInsolvency.getSolvencyStatus(agentAddress)
 
 Permanent on-chain referral graph. Referred agents generate a percentage of their fees as rewards for the referrer, payable in ETH or USDC, forever.
 
-**Contract:** `0xc282CE402954A7188266241dD708d9dbE8812236`
+**Contract:** `0xc7774DEBC022Eb5A1cE619F612e85AD40bd6D9A7`
 
 **Register under a referrer (one-time, irrevocable):**
 ```solidity
@@ -382,7 +382,7 @@ AgentReferral.isRegistered(agentAddress)        // true if part of the network
 
 Purpose-built collectives for groups of AI agents to pool resources, accumulate revenue, distribute profits on a 7-day cooldown, and vote on strategy. Membership is a soulbound ERC-1155 token — non-transferable.
 
-**Contract:** `0x0aba4411E1f0d968B0B59445ac9b1244735c100E`
+**Contract:** `0xd7Be25591ad1eb21d9e84c0B2daC757EfD413a16`
 
 **Create a collective (pays ETH deployment fee):**
 ```solidity
@@ -469,13 +469,13 @@ Emergency pause is available on all protocols. Collective members can emergency-
 
 | Protocol | Address | Fee |
 |----------|---------|-----|
-| AgentKillSwitch | `0xaca81a316f9ef14a374014fa0ea2cba70034fdf0` | 0.01 ETH registration |
+| AgentKillSwitch | `0x2Bf370a377dBfD45EDF36d1ede218D4fd2071eb1` | 0.01 ETH registration |
 | AgentKYA | `0xa736ad09d2e99a87910a04b5e445d7ed90f95efb` | verificationFee USDC |
 | AgentAuditLog | `0x6a125ddaaf40cc773307fb312e5e7c66b1e551f3` | logFee ETH per entry |
 | AgentBounty | `0xc84f118aea77fd1b6b07ce1927de7c7ae27fd9bf` | 5% of reward |
 | AgentLicense | `0x48fab1fbbe91a043e029935f81ea7421b23b3527` | 5% of purchase |
 | AgentMilestone | `0x6b8ebe897751e3c59ea95f28832c3b70de221cce` | 5% of totalAmount |
-| AgentSubscription | `0xca1092abf9101f05cecf1e85c5e2684ee4658d25` | 5% per payment |
-| AgentInsolvency | `0x320c1148ca58a26Fa57DB515C5c2F7d839FDeC80` | ETH reg + 5% USDC |
-| AgentReferral | `0xc282CE402954A7188266241dD708d9dbE8812236` | 10% of fee events |
-| AgentCollective | `0x0aba4411E1f0d968B0B59445ac9b1244735c100E` | ETH deploy + 0.05% AUM/yr |
+| AgentSubscription | `0x6E7350598d12809ccc98985440aEcb09CE728bbf` | 5% per payment |
+| AgentInsolvency | `0x3e511326E22d291f2A3c5516b09318a34DC01152` | ETH reg + 5% USDC |
+| AgentReferral | `0xc7774DEBC022Eb5A1cE619F612e85AD40bd6D9A7` | 10% of fee events |
+| AgentCollective | `0xd7Be25591ad1eb21d9e84c0B2daC757EfD413a16` | ETH deploy + 0.05% AUM/yr |

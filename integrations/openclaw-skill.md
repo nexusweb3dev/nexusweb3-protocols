@@ -1,7 +1,7 @@
 ---
 name: nexusweb3
 description: Complete financial infrastructure for AI agents on Base mainnet — wallet, identity, payments, yield, insurance, reputation, marketplace, bridge, governance, and launchpad.
-homepage: https://basescan.org/address/0x1F28579F8C2dffde8746169116bb3a4d9E516f5A
+homepage: https://basescan.org/address/0x190474472bf3534A73c76CB50D105CC2F35D2ccb
 user-invocable: true
 metadata: {"clawdbot": {"emoji": "🏦", "requires": {"env": ["ETH_OPERATOR_KEY"]}, "primaryEnv": "ETH_OPERATOR_KEY"}}
 ---
@@ -49,7 +49,7 @@ Three steps to get your agent on-chain:
 
 Non-custodial smart wallet for AI agents with operator spending limits and ERC-4626 vault standard.
 
-**Contract:** `0x1F28579F8C2dffde8746169116bb3a4d9E516f5A`
+**Contract:** `0x190474472bf3534A73c76CB50D105CC2F35D2ccb`
 
 **Deploy your vault:**
 ```solidity
@@ -346,7 +346,7 @@ AgentLaunchpad.launchProtocol{value: 0.01 ether}(
 
 | Protocol | Address | Fee |
 |----------|---------|-----|
-| AgentVaultFactory | `0x1F28579F8C2dffde8746169116bb3a4d9E516f5A` | 0.1% deposit |
+| AgentVaultFactory | `0x190474472bf3534A73c76CB50D105CC2F35D2ccb` | 0.1% deposit |
 | AgentRegistry | `0x6F73c4e1609b8f16a6e6B9227B9e7B411bFDeC60` | $5 reg + $1/yr |
 | AgentEscrow | `0xD3B07218A58cC75F0e47cbB237D7727970028a6E` | 0.5% settlement |
 | AgentYield | `0x4c5aA529Ef17f30D49497b3c7fe108A034FD6474` | 10% yield |
