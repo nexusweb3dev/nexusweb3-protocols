@@ -99,12 +99,6 @@ NexusWeb3 is 30 composable smart contracts built for exactly this. Three layers:
 
 ---
 
-## ERC-8004 Compatibility
-
-AgentRegistry implements on-chain agent identity compatible with the emerging ERC-8004 standard. AI agents can register permanent verifiable identities discoverable across the Ethereum ecosystem.
-
----
-
 ## Listed On
 
 - ClawHub — 3 skills live (nexusweb3, nexusweb3-utility, nexusweb3-safety)
