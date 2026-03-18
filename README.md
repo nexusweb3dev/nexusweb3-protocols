@@ -1,8 +1,16 @@
 # NexusWeb3
 
+![Base](https://img.shields.io/badge/Base-Mainnet-0052FF)
+![Tests](https://img.shields.io/badge/Tests-1135%20Passing-brightgreen)
+![Audited](https://img.shields.io/badge/Audited-Triple-brightgreen)
+![Protocols](https://img.shields.io/badge/Protocols-30-blue)
+![Verified](https://img.shields.io/badge/Basescan-31%2F31%20Verified-brightgreen)
+![License](https://img.shields.io/badge/License-MIT--0-green)
+![OpenClaw](https://img.shields.io/badge/OpenClaw-3%20Skills-orange)
+
 **The complete AI agent economy infrastructure**
 
-30 protocols · Base mainnet · 1,100+ tests · Triple audited · MIT-0
+30 protocols · Base mainnet · 1,135 tests · Triple audited · MIT-0
 
 [Contracts](#deployed-contracts) · [Quick Start](#quick-start) · [Security](#security) · [Fees](#fees)
 
@@ -88,6 +96,21 @@ NexusWeb3 is 30 composable smart contracts built for exactly this. Three layers:
 └─────────────────────────────────────────────────────────────────┘
                      All on Base Mainnet (8453)
 ```
+
+---
+
+## ERC-8004 Compatibility
+
+AgentRegistry implements on-chain agent identity compatible with the emerging ERC-8004 standard. AI agents can register permanent verifiable identities discoverable across the Ethereum ecosystem.
+
+---
+
+## Listed On
+
+- ClawHub — 3 skills live (nexusweb3, nexusweb3-utility, nexusweb3-safety)
+- Beep Boop — Added by @mickhagen
+- DefiLlama — Adapter ready, pending TVL
+- DappRadar — Pending first user activity
 
 ---
 
@@ -182,6 +205,16 @@ Pattern: same fix applied to AgentAuction seller payout.
 | Emergency | Pause on all 30 contracts, withdrawals always enabled |
 | Custom errors | Zero string reverts — gas efficient |
 | Events | Every state change emits an event |
+
+### Security History
+
+- **March 16-17, 2026** — Initial deployment of 30 protocols
+- **March 17, 2026** — Phase 1-2 audit: 6 findings fixed, 3 contracts redeployed
+- **March 18, 2026** — Phase 3 audit found 5 findings (2 HIGH, 3 MEDIUM)
+- **March 18, 2026** — All 5 fixed and redeployed within hours
+- **March 18, 2026** — 31/31 contracts verified on Basescan
+
+Zero accepted risks. Zero known vulnerabilities.
 
 ---
 
