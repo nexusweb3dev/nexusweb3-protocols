@@ -72,6 +72,7 @@ nexusweb3 reputation get --agent 0xPRINCIPAL
 nexusweb3 escrow create --provider 0xPROVIDER --amounts 100,150 --deadline-hours 168
 nexusweb3 escrow submit --job-id 0 --index 0 --hash DELIVERABLE_0
 nexusweb3 escrow approve --job-id 0 --index 0
+nexusweb3 escrow claim --job-id 0 --index 0      # provider, after the 7-day review window
 nexusweb3 escrow get --job-id 0
 nexusweb3 escrow list --agent 0xPRINCIPAL
 nexusweb3 killswitch status --agent 0xPRINCIPAL
@@ -101,7 +102,8 @@ cd sdk/python && python scripts/e2e.py
 operators register identities, the client operator creates a two-milestone job ($100 + $150), the
 provider submits and the client approves both, then it asserts `Completed`, the $250 payout, two
 positive reputation entries and the audit trail. A final phase signs an EIP-2612 permit and calls
-`create_job_with_permit` with no prior approval. Override `RPC_URL` and `ADDRESSES_JSON` to point it
+`create_job_with_permit` with no prior approval, then has the provider submit, advances the anvil
+clock 8 days and claims the milestone through `claim_approval`, asserting the payout. Override `RPC_URL` and `ADDRESSES_JSON` to point it
 elsewhere; it exits non-zero if any check fails.
 
 Two notes on that run:
