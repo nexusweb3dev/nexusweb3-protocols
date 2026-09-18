@@ -1,5 +1,26 @@
 # NexusWeb3 — Deployment Registry
 
+## v2 Core (September 2026) — PENDING DEPLOY
+
+Deploy via `deployments/V2-RUNBOOK.md`; addresses are written to `deployments/v2-<chainId>.json` by the script.
+
+| Contract | Base Sepolia (84532) | Base Mainnet (8453) | Tests |
+|---|---|---|---|
+| AgentAccess | pending | pending | (integration) |
+| AgentIdentityV2 | pending | pending | 66 |
+| AgentReputationV2 | pending | pending | 46 |
+| AgentKillSwitchV2 | pending | pending | 64 |
+| AgentAuditLogV2 | pending | pending | 54 |
+| FeeRouter | pending | pending | 42 |
+| AgentEscrowV2 | pending | pending | 138 |
+| Integration (all) | | | 13 |
+
+v1 status: 8 contracts supported, 23 deprecated (see `docs/DEPRECATIONS.md`). All v1 deployments below have zero transactions and hold no funds as of 2026-09-18.
+
+---
+
+## v1 (March 2026)
+
 **Network:** Base Mainnet (Chain ID: 8453)
 **Owner:** `0xF98B46456565d34a3a580963D8cb7B3aBDff7a85`
 **USDC:** `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`

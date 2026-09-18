@@ -23,6 +23,9 @@ jobs:
           forge install foundry-rs/forge-std@v1.9.4 --no-git
           forge install OpenZeppelin/openzeppelin-contracts@v5.1.0 --no-git
 
+      - name: Format check (v2)
+        run: forge fmt --check src/v2 test/v2 script/v2
+
       - name: Build
         run: forge build --sizes
 

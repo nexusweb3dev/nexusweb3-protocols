@@ -21,3 +21,12 @@ coverage/
 # IDE
 .idea/
 .vscode/
+
+# SDK / local artifacts
+sdk/ts/node_modules/
+sdk/ts/dist/
+sdk/python/.venv/
+sdk/python/**/__pycache__/
+sdk/python/*.egg-info/
+deployments/v2-local*.json
+broadcast/**/31337/
