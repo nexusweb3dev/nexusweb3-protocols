@@ -8,7 +8,7 @@ version = "2.0.0"
 description = "Python SDK for the NexusWeb3 v2 agent protocol contracts"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = {text = "MIT-0"}
 authors = [{name = "NexusWeb3"}]
 keywords = ["ethereum", "web3", "agents", "escrow", "base"]
 dependencies = [

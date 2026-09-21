@@ -2,7 +2,7 @@
   "name": "@nexusweb3/sdk",
   "version": "2.0.0",
   "description": "TypeScript SDK and MCP server for the NexusWeb3 v2 agent protocol stack (identity, reputation, kill switch, audit log, milestone escrow).",
-  "license": "MIT",
+  "license": "MIT-0",
   "type": "module",
   "engines": {
     "node": ">=20"
