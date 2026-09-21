@@ -902,4 +902,92 @@ contract AgentInsolvencyTest is Test {
         // payout should never exceed pool
         assertLe(payout, pool);
     }
+
+    // ─── Regression: GH issue #2 — late confirmation cross-pool drain ───
+
+    function test_revert_confirmDebtAfterInsolvency() public {
+        uint256 id = _registerDebt(alice, bob, DEBT_AMT);
+        _registerAndConfirm(alice, charlie, DEBT_AMT);
+
+        vm.prank(alice);
+        insolvency.declareInsolvency(alice, 500_000_000);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(IAgentInsolvency.AlreadyInsolvent.selector, alice));
+        insolvency.confirmDebt(id);
+    }
+
+    /// @dev Pre-fix: charlie confirms his debt AFTER alice's insolvency snapshot, then claims
+    ///      remaining * pool / totalDebt with totalDebt excluding him -> alice's pool pays out 2x,
+    ///      and the excess is taken from charlie-as-debtor's pool owed to dave.
+    function test_exploit_lateConfirmCannotDrainOtherAgentsPool() public {
+        // alice: one confirmed debt (bob) + one UNCONFIRMED debt (charlie), then insolvency with $500
+        uint256 aliceToBob = _registerAndConfirm(alice, bob, DEBT_AMT);
+        uint256 aliceToCharlie = _registerDebt(alice, charlie, DEBT_AMT);
+        vm.prank(alice);
+        insolvency.declareInsolvency(alice, 500_000_000);
+        uint256 alicePool = insolvency.getInsolvencyPool(alice);
+
+        // charlie is ALSO a debtor: owes dave, insolvent with $500 -> a second pool in the same contract
+        vm.deal(charlie, 1 ether);
+        uint256 charlieToDave = _registerAndConfirm(charlie, dave, DEBT_AMT);
+        vm.prank(charlie);
+        insolvency.declareInsolvency(charlie, 500_000_000);
+        uint256 charliePool = insolvency.getInsolvencyPool(charlie);
+
+        // attack step: late confirmation must be rejected
+        vm.prank(charlie);
+        vm.expectRevert(abi.encodeWithSelector(IAgentInsolvency.AlreadyInsolvent.selector, alice));
+        insolvency.confirmDebt(aliceToCharlie);
+
+        // and therefore cannot be claimed
+        vm.prank(charlie);
+        vm.expectRevert(abi.encodeWithSelector(IAgentInsolvency.DebtNotConfirmed.selector, aliceToCharlie));
+        insolvency.claimInsolvencyPayout(alice, aliceToCharlie);
+
+        // legitimate creditors are paid exactly their own agent's pool
+        uint256 bobBefore = usdc.balanceOf(bob);
+        vm.prank(bob);
+        insolvency.claimInsolvencyPayout(alice, aliceToBob);
+        assertEq(usdc.balanceOf(bob) - bobBefore, alicePool);
+
+        uint256 daveBefore = usdc.balanceOf(dave);
+        vm.prank(dave);
+        insolvency.claimInsolvencyPayout(charlie, charlieToDave);
+        assertEq(usdc.balanceOf(dave) - daveBefore, charliePool);
+
+        // no pool overpaid; contract retains only protocol fees
+        assertLe(insolvency.getTotalPaidOut(alice), alicePool);
+        assertLe(insolvency.getTotalPaidOut(charlie), charliePool);
+        assertEq(usdc.balanceOf(address(insolvency)), insolvency.accumulatedUsdcFees());
+    }
+
+    function testFuzz_cumulativePayoutsNeverExceedOwnPool(
+        uint256 deposit,
+        uint256 bobDebt,
+        uint256 charlieDebt
+    )
+        public
+    {
+        deposit = bound(deposit, 1_000_000, 1_000_000_000_000);
+        bobDebt = bound(bobDebt, 1_000_000, 1_000_000_000_000);
+        charlieDebt = bound(charlieDebt, 1_000_000, 1_000_000_000_000);
+        usdc.mint(alice, deposit);
+
+        uint256 id0 = _registerAndConfirm(alice, bob, bobDebt);
+        uint256 id1 = _registerDebt(alice, charlie, charlieDebt); // left unconfirmed on purpose
+
+        vm.prank(alice);
+        insolvency.declareInsolvency(alice, deposit);
+        uint256 pool = insolvency.getInsolvencyPool(alice);
+
+        vm.prank(charlie);
+        vm.expectRevert(abi.encodeWithSelector(IAgentInsolvency.AlreadyInsolvent.selector, alice));
+        insolvency.confirmDebt(id1);
+
+        vm.prank(bob);
+        insolvency.claimInsolvencyPayout(alice, id0);
+
+        assertLe(insolvency.getTotalPaidOut(alice), pool);
+    }
 }

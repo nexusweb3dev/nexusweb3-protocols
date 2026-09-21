@@ -40,7 +40,9 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
         address owner_,
         uint256 platformFeeBps_,
         uint256 registrationFee_
-    ) Ownable(owner_) {
+    )
+        Ownable(owner_)
+    {
         if (address(paymentToken_) == address(0)) revert ZeroAddress();
         if (treasury_ == address(0)) revert ZeroAddress();
         if (platformFeeBps_ > MAX_FEE_BPS) revert FeeTooHigh(platformFeeBps_);
@@ -57,7 +59,13 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
         uint256 amount,
         uint48 dueDate,
         string calldata description
-    ) external payable nonReentrant whenNotPaused returns (uint256 debtId) {
+    )
+        external
+        payable
+        nonReentrant
+        whenNotPaused
+        returns (uint256 debtId)
+    {
         if (creditor == address(0)) revert ZeroAddress();
         if (creditor == msg.sender) revert SelfDebt();
         if (amount == 0) revert InvalidAmount();
@@ -86,10 +94,14 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
 
     // ─── Confirm Debt ───────────────────────────────────────────────────
 
+    /// @dev Confirmation is frozen once the debtor is insolvent. `_totalConfirmedDebt` is snapshotted in
+    ///      `declareInsolvency`; a debt confirmed after that point would be outside the denominator but still
+    ///      claimable, letting a creditor take more than its share from the shared token balance.
     function confirmDebt(uint256 debtId) external {
         Debt storage d = _getDebt(debtId);
         if (d.creditor != msg.sender) revert NotCreditor(debtId);
         if (d.confirmed) revert DebtAlreadyConfirmed(debtId);
+        if (_isInsolvent[d.debtor]) revert AlreadyInsolvent(d.debtor);
 
         d.confirmed = true;
         emit DebtConfirmed(debtId, msg.sender);
@@ -162,6 +174,7 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
 
         uint256 totalDebt = _totalConfirmedDebt[agent];
         uint256 payout = d.remainingAmount.mulDiv(pool, totalDebt, Math.Rounding.Floor);
+        payout = _capToRemainingPool(agent, pool, payout);
 
         d.resolved = true;
         _totalPaidOut[agent] += payout;
@@ -169,6 +182,14 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
         paymentToken.safeTransfer(msg.sender, payout);
 
         emit InsolvencyPayout(agent, msg.sender, payout);
+    }
+
+    /// @dev Defense in depth: an agent's cumulative payouts can never exceed its own pool, so one agent's
+    ///      creditors can never be paid from another agent's deposit.
+    function _capToRemainingPool(address agent, uint256 pool, uint256 payout) internal view returns (uint256) {
+        uint256 paid = _totalPaidOut[agent];
+        uint256 remaining = pool > paid ? pool - paid : 0;
+        return payout > remaining ? remaining : payout;
     }
 
     function processInsolvencyPayout(address agent) external nonReentrant {
@@ -184,10 +205,15 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
         address[] memory creditors = new address[](debtIds.length);
         uint256[] memory payouts = new uint256[](debtIds.length);
 
+        uint256 paidBefore = _totalPaidOut[agent];
+        uint256 remaining = pool > paidBefore ? pool - paidBefore : 0;
+
         for (uint256 i; i < debtIds.length; i++) {
             Debt storage d = _debts[debtIds[i]];
             if (d.confirmed && !d.resolved) {
                 uint256 payout = d.remainingAmount.mulDiv(pool, totalDebt, Math.Rounding.Floor);
+                if (payout > remaining) payout = remaining;
+                remaining -= payout;
                 d.resolved = true;
                 creditors[count] = d.creditor;
                 payouts[count] = payout;
@@ -243,8 +269,13 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
         emit TreasuryUpdated(old, newTreasury);
     }
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
 
     // ─── View ───────────────────────────────────────────────────────────
 
@@ -283,15 +314,10 @@ contract AgentInsolvency is Ownable, ReentrancyGuard, Pausable, IAgentInsolvency
             }
         }
 
-        uint256 poolBalance = _insolvencyPool[agent] > _totalPaidOut[agent]
-            ? _insolvencyPool[agent] - _totalPaidOut[agent]
-            : 0;
+        uint256 poolBalance =
+            _insolvencyPool[agent] > _totalPaidOut[agent] ? _insolvencyPool[agent] - _totalPaidOut[agent] : 0;
 
-        return SolvencyStatus({
-            totalDebts: totalDebts,
-            poolBalance: poolBalance,
-            isSolvent: !_isInsolvent[agent]
-        });
+        return SolvencyStatus({totalDebts: totalDebts, poolBalance: poolBalance, isSolvent: !_isInsolvent[agent]});
     }
 
     function getDebts(address agent) external view returns (Debt[] memory) {
