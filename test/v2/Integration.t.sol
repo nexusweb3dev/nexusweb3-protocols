@@ -96,10 +96,16 @@ contract IntegrationTest is Test {
         });
     }
 
-    function test_fullLifecycle_hotKeysOnly() public {
-        // Hot key creates the job; USDC leaves the cold principal.
+    function _createAccepted() internal returns (uint256 jobId) {
         vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params());
+        jobId = escrow.createJob(_params());
+        vm.prank(providerOp);
+        escrow.acceptJob(jobId);
+    }
+
+    function test_fullLifecycle_hotKeysOnly() public {
+        // Hot key creates the job; USDC leaves the cold principal; provider hot key accepts.
+        uint256 jobId = _createAccepted();
         assertEq(usdc.balanceOf(address(escrow)), TOTAL);
         assertEq(usdc.balanceOf(client), 10_000_000_000 - TOTAL);
 
@@ -138,6 +144,7 @@ contract IntegrationTest is Test {
         assertGt(auditLog.getLogCount(provider), 0);
         IAgentAuditLogV2.ActionLog[] memory logs = auditLog.getAgentLogs(client, 0, 100);
         assertEq(logs[0].actionType, bytes32("ESCROW_JOB_CREATED"));
+        assertEq(logs[1].actionType, bytes32("ESCROW_JOB_ACCEPTED"));
         assertEq(logs[0].caller, address(escrow));
         assertEq(logs[logs.length - 1].actionType, bytes32("ESCROW_JOB_COMPLETED"));
     }
@@ -186,8 +193,7 @@ contract IntegrationTest is Test {
     }
 
     function test_dispute_arbiterSplits_reputationFollows() public {
-        vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params());
+        uint256 jobId = _createAccepted();
         vm.prank(providerOp);
         escrow.submitMilestone(jobId, 0, keccak256("bad-work"));
         vm.prank(clientOp);
@@ -225,15 +231,14 @@ contract IntegrationTest is Test {
         vm.prank(clientOp);
         uint256 jobId = escrow.createJob(_params());
         vm.warp(block.timestamp + 8 days);
-        escrow.refundExpired(jobId);
+        escrow.settleExpired(jobId);
         assertEq(usdc.balanceOf(client), 10_000_000_000);
         assertEq(reputation.getStats(provider).negatives, 0);
         assertEq(reputation.getStats(provider).positives, 0);
     }
 
     function test_moduleOutage_neverLocksFunds() public {
-        vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params());
+        uint256 jobId = _createAccepted();
         // Owner pauses reputation and audit log (writes revert); escrow keeps paying out.
         vm.startPrank(owner);
         reputation.pause();
@@ -249,8 +254,7 @@ contract IntegrationTest is Test {
     function test_feeSwitchOff_zeroFees() public {
         vm.prank(owner);
         escrow.setFeeBps(0);
-        vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params());
+        uint256 jobId = _createAccepted();
         vm.prank(clientOp);
         escrow.approveMilestone(jobId, 0);
         assertEq(usdc.balanceOf(provider), M1);
@@ -259,22 +263,23 @@ contract IntegrationTest is Test {
     }
 
     function test_dispute_afterDeadline_rejected_noLockupExtension() public {
-        vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params());
+        uint256 jobId = _createAccepted();
         vm.prank(providerOp);
         escrow.submitMilestone(jobId, 0, keccak256("late"));
         vm.warp(block.timestamp + 7 days + 1);
         vm.prank(providerOp);
         vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.DeadlinePassed.selector, jobId));
         escrow.dispute(jobId, keccak256("stall"));
-        // Client is refundable immediately, not 30 days later.
-        escrow.refundExpired(jobId);
-        assertEq(usdc.balanceOf(client), 10_000_000_000);
+        // Settlement by rule, immediately: the submitted milestone vests to the provider,
+        // the unsubmitted one refunds to the client.
+        escrow.settleExpired(jobId);
+        uint256 fee = M1 * FEE_BPS / 10_000;
+        assertEq(usdc.balanceOf(provider), M1 - fee);
+        assertEq(usdc.balanceOf(client), 10_000_000_000 - M1);
     }
 
     function test_reviewWindow_silentClient_providerClaims() public {
-        vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params()); // deadline = day 7
+        uint256 jobId = _createAccepted(); // deadline = day 7
         vm.warp(block.timestamp + 5 days);
         vm.prank(providerOp);
         escrow.submitMilestone(jobId, 0, keccak256("done")); // review window ends day 12
@@ -287,7 +292,7 @@ contract IntegrationTest is Test {
         // Deadline (day 7) passes, but the submission is still under review, so no refund yet.
         vm.warp(block.timestamp + 2 days + 1);
         vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.DeadlineNotReached.selector, jobId));
-        escrow.refundExpired(jobId);
+        escrow.settleExpired(jobId);
         assertEq(escrow.expiryOf(jobId), uint48(block.timestamp - 2 days - 1 + 7 days));
 
         // Window elapses (day 12): provider gets paid for the ignored milestone.
@@ -299,13 +304,12 @@ contract IntegrationTest is Test {
         assertEq(reputation.getStats(provider).positives, 1);
 
         // Nothing else submitted: the rest expires back to the client.
-        escrow.refundExpired(jobId);
+        escrow.settleExpired(jobId);
         assertEq(usdc.balanceOf(client), 10_000_000_000 - M1);
     }
 
     function test_reviewWindow_clientRejectsInTime_blocksClaim() public {
-        vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params());
+        uint256 jobId = _createAccepted();
         vm.prank(providerOp);
         escrow.submitMilestone(jobId, 0, keccak256("junk"));
         vm.warp(block.timestamp + 6 days);
@@ -315,13 +319,12 @@ contract IntegrationTest is Test {
         vm.prank(providerOp);
         vm.expectRevert();
         escrow.claimApproval(jobId, 0); // back to Pending, nothing to claim
-        escrow.refundExpired(jobId); // deadline passed, no live submission
+        escrow.settleExpired(jobId); // deadline passed, no live submission
         assertEq(usdc.balanceOf(client), 10_000_000_000);
     }
 
     function test_feeRouterFault_parksFeeForOwner_payoutProceeds() public {
-        vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params());
+        uint256 jobId = _createAccepted();
         vm.prank(owner);
         feeRouter.revokeProtocol(address(escrow)); // simulate a misconfigured router
         vm.prank(clientOp);
@@ -331,7 +334,7 @@ contract IntegrationTest is Test {
         assertEq(escrow.claimable(owner), fee);
         assertEq(usdc.balanceOf(address(feeRouter)), 0);
         vm.prank(owner);
-        escrow.withdrawClaimable();
+        escrow.withdrawClaimable(owner, owner);
         assertEq(usdc.balanceOf(owner), fee);
         assertEq(usdc.balanceOf(address(escrow)), M2);
     }
@@ -339,8 +342,7 @@ contract IntegrationTest is Test {
     /// @dev For every gas limit, the call either reverts or the best-effort hooks actually landed.
     ///      This is what stops eth_estimateGas from picking a limit that silently drops the writes.
     function test_gasFloor_noLimitDropsHooksSilently() public {
-        vm.prank(clientOp);
-        uint256 jobId = escrow.createJob(_params());
+        uint256 jobId = _createAccepted();
         vm.prank(providerOp);
         escrow.submitMilestone(jobId, 0, keccak256("d"));
         uint256 logsBefore = auditLog.getLogCount(provider);
@@ -362,5 +364,141 @@ contract IntegrationTest is Test {
             }
             vm.revertToState(snap);
         }
+    }
+
+    function test_offer_notAccepted_clientCancelsAnytime_noReputation() public {
+        vm.prank(clientOp);
+        uint256 jobId = escrow.createJob(_params());
+        vm.prank(providerOp);
+        vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.NotAccepted.selector, jobId));
+        escrow.submitMilestone(jobId, 0, keccak256("x"));
+        vm.prank(clientOp);
+        vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.NotAccepted.selector, jobId));
+        escrow.dispute(jobId, keccak256("x"));
+        vm.prank(clientOp);
+        escrow.cancelJob(jobId);
+        assertEq(usdc.balanceOf(client), 10_000_000_000);
+        assertEq(reputation.getStats(provider).positives + reputation.getStats(provider).negatives, 0);
+    }
+
+    function test_vesting_settleCannotFrontRunClaim() public {
+        uint256 jobId = _createAccepted();
+        vm.warp(block.timestamp + 5 days);
+        vm.prank(providerOp);
+        escrow.submitMilestone(jobId, 0, keccak256("done"));
+        vm.warp(block.timestamp + 7 days + 1); // window closed, expiry reached at the same second
+        // Whoever settles, the submitted milestone is the provider's.
+        escrow.settleExpired(jobId);
+        uint256 fee = M1 * FEE_BPS / 10_000;
+        assertEq(usdc.balanceOf(provider), M1 - fee);
+        assertEq(usdc.balanceOf(client), 10_000_000_000 - M1);
+    }
+
+    function test_rejectAfterWindow_blocked() public {
+        uint256 jobId = _createAccepted();
+        vm.prank(providerOp);
+        escrow.submitMilestone(jobId, 0, keccak256("done"));
+        vm.warp(block.timestamp + 7 days + 1);
+        vm.prank(clientOp);
+        vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.ReviewWindowClosed.selector, jobId, 0));
+        escrow.rejectMilestone(jobId, 0, keccak256("late"));
+    }
+
+    function test_submitAfterDeadline_blocked_and_rejectionCap() public {
+        uint256 jobId = _createAccepted();
+        for (uint8 i = 0; i < 3; i++) {
+            vm.prank(providerOp);
+            escrow.submitMilestone(jobId, 0, keccak256(abi.encode(i)));
+            vm.prank(clientOp);
+            escrow.rejectMilestone(jobId, 0, keccak256("no"));
+        }
+        vm.prank(providerOp);
+        vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.TooManyRejections.selector, jobId, 0));
+        escrow.submitMilestone(jobId, 0, keccak256("again"));
+        vm.warp(block.timestamp + 7 days + 1);
+        vm.prank(providerOp);
+        vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.DeadlinePassed.selector, jobId));
+        escrow.submitMilestone(jobId, 1, keccak256("late"));
+        // Client cannot cancel after submissions; deadline settlement refunds the client.
+        vm.prank(clientOp);
+        vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.CannotCancel.selector, jobId));
+        escrow.cancelJob(jobId);
+        escrow.settleExpired(jobId);
+        assertEq(usdc.balanceOf(client), 10_000_000_000);
+    }
+
+    function test_dispute_silentArbiter_submittedWorkPaysProvider() public {
+        uint256 jobId = _createAccepted();
+        vm.prank(providerOp);
+        escrow.submitMilestone(jobId, 0, keccak256("done"));
+        vm.prank(clientOp);
+        escrow.dispute(jobId, keccak256("stall"));
+        vm.expectRevert(abi.encodeWithSelector(IAgentEscrowV2.DeadlineNotReached.selector, jobId));
+        escrow.settleExpired(jobId);
+        vm.warp(block.timestamp + 30 days + 1);
+        escrow.settleExpired(jobId);
+        uint256 fee = M1 * FEE_BPS / 10_000;
+        assertEq(usdc.balanceOf(provider), M1 - fee);
+        assertEq(usdc.balanceOf(client), 10_000_000_000 - M1);
+    }
+
+    function test_arbiterMustBeIndependent() public {
+        IAgentEscrowV2.CreateParams memory p = _params();
+        p.arbiter = clientOp; // client's own operator
+        vm.prank(clientOp);
+        vm.expectRevert(IAgentEscrowV2.InvalidParty.selector);
+        escrow.createJob(p);
+    }
+
+    function test_blacklistedRecipient_operatorWithdrawsClaimableElsewhere() public {
+        // Simulate: provider gets parked funds (pause-free path: use a token that blocks provider)
+        // Covered in unit suite with FailingToken; here check the operator/to path on parked owner fee.
+        uint256 jobId = _createAccepted();
+        vm.prank(owner);
+        feeRouter.revokeProtocol(address(escrow));
+        vm.prank(clientOp);
+        escrow.approveMilestone(jobId, 0);
+        uint256 fee = M1 * FEE_BPS / 10_000;
+        address ownerOp = makeAddr("ownerOp");
+        vm.prank(owner);
+        access.authorizeOperator(ownerOp, uint48(block.timestamp + 1 days));
+        vm.prank(ownerOp);
+        escrow.withdrawClaimable(owner, treasury);
+        assertEq(usdc.balanceOf(treasury), fee);
+    }
+
+    function test_operatorCanRenounceItself() public {
+        vm.prank(clientOp);
+        access.renounceOperator(client);
+        assertFalse(access.isOperatorFor(client, clientOp));
+        vm.prank(clientOp);
+        vm.expectRevert();
+        escrow.createJob(_params());
+        // A stranger cannot renounce a key it does not hold.
+        vm.prank(makeAddr("nobody"));
+        vm.expectRevert(abi.encodeWithSelector(IAgentAccess.NotOperator.selector, client, makeAddr("nobody")));
+        access.renounceOperator(client);
+    }
+
+    function test_dustJob_earnsNoPositiveReputation() public {
+        IAgentEscrowV2.CreateParams memory p = _params();
+        p.milestoneAmounts[0] = 1; // 0.000001 USDC
+        p.milestoneAmounts[1] = 9_999_998; // total just under $10
+        vm.prank(clientOp);
+        uint256 jobId = escrow.createJob(p);
+        vm.prank(providerOp);
+        escrow.acceptJob(jobId);
+        vm.startPrank(clientOp);
+        escrow.approveMilestone(jobId, 0);
+        escrow.approveMilestone(jobId, 1);
+        vm.stopPrank();
+        assertEq(reputation.getStats(provider).positives, 0);
+        assertEq(reputation.getStats(client).positives, 0); // job total < $10 too
+        assertEq(uint8(escrow.getJob(jobId).status), uint8(IAgentEscrowV2.JobStatus.Completed));
+    }
+
+    function test_revert_escrowConstructor_tokenWithoutCode() public {
+        vm.expectRevert(IAgentEscrowV2.ZeroAddress.selector);
+        new AgentEscrowV2(IAgentAccess(address(access)), IERC20(makeAddr("eoa-token")), owner);
     }
 }

@@ -8,13 +8,17 @@ from web3 import Web3
 
 from ..tx import TxResult
 from ..types import ActionLog, coerce_bytes32
-from .base import ContractClient
+from .base import Ownable2StepClient
 
 __all__ = ["AuditLogClient"]
 
 
-class AuditLogClient(ContractClient):
+class AuditLogClient(Ownable2StepClient):
     """`action_type` and `data_hash` accept a short label, a 0x-hex digest or raw bytes."""
+
+    def max_page_size(self) -> int:
+        """Entries one `get_agent_logs` page returns at most; larger `limit` values are clipped."""
+        return int(self._call("MAX_PAGE_SIZE"))
 
     def log(
         self,

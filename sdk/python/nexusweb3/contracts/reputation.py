@@ -4,27 +4,29 @@ from __future__ import annotations
 
 from web3 import Web3
 
+from ..amount import UsdcAmount, to_base_units
 from ..tx import TxResult
 from ..types import ReputationCategory, Stats, Tier
-from .base import ContractClient
+from .base import Ownable2StepClient
 
 __all__ = ["ReputationClient"]
 
 _TIERS: tuple[Tier, ...] = (Tier.BRONZE, Tier.SILVER, Tier.GOLD, Tier.PLATINUM)
 
 
-class ReputationClient(ContractClient):
+class ReputationClient(Ownable2StepClient):
     """Reads are free; `record_interaction` is restricted to authorized protocols."""
 
     def record_interaction(
-        self, agent: str, positive: bool, category: int | ReputationCategory, value_usdc: int
+        self, agent: str, positive: bool, category: int | ReputationCategory, value_usdc: UsdcAmount
     ) -> TxResult:
+        """`value_usdc` is a USDC figure in dollars, like every other amount in this SDK."""
         return self._send(
             "recordInteraction",
             Web3.to_checksum_address(agent),
             bool(positive),
             int(category),
-            int(value_usdc),
+            to_base_units(value_usdc, "value_usdc"),
         )
 
     def get_score(self, agent: str) -> int:

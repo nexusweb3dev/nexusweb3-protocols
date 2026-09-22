@@ -22,13 +22,15 @@ from nexusweb3 import (
     MilestoneStatus,
     NexusClient,
     load_addresses,
+    parse_usdc,
     sign_permit,
 )
 
-from e2e_support import Checks, deploy, load_forge_artifact, load_local_artifact
+from e2e_support import Checks, advance_time, deploy, load_forge_artifact, load_local_artifact
 
-MILESTONE = 75_000_000  # $75 USDC
-MINT_AMOUNT = 1_000_000_000_000  # 1,000,000 USDC
+MILESTONE_USDC = "75.25"
+MILESTONE = parse_usdc(MILESTONE_USDC)
+MINT_AMOUNT = 1_000_000_000_000  # 1,000,000 USDC in base units: minted straight through the mock
 REVIEW_WINDOW_SKIP = 8 * 24 * 3600  # one day past the 7-day review window
 
 
@@ -64,12 +66,6 @@ def _deploy_permit_stack(w3: Web3, owner: Any, addresses: Any, funded: str) -> t
     return token, escrow
 
 
-def _advance_time(w3: Web3, seconds: int) -> None:
-    """Move the anvil clock forward and mine a block so the new timestamp takes effect."""
-    w3.provider.make_request("evm_increaseTime", [seconds])
-    w3.provider.make_request("evm_mine", [])
-
-
 def run_claim_phase(
     checks: Checks,
     w3: Web3,
@@ -80,6 +76,12 @@ def run_claim_phase(
 ) -> None:
     """Provider submits, the client stays silent past REVIEW_WINDOW, provider claims the payout."""
     operator = NexusClient(w3, permit_addresses, Account.from_key(provider_operator_key))
+    operator.escrow.accept_job(job_id)
+    checks.check(
+        "provider accepted the permit job",
+        operator.escrow.get_job(job_id).accepted,
+        "acceptJob precedes every submission",
+    )
     operator.escrow.submit_milestone(job_id, 0, "PERMIT_DELIVERABLE")
     deadline = operator.escrow.get_job(job_id).deadline
     expiry = operator.escrow.expiry_of(job_id)
@@ -90,7 +92,7 @@ def run_claim_phase(
     )
 
     balance_before = operator.usdc.balance_of(provider)
-    _advance_time(w3, REVIEW_WINDOW_SKIP)
+    advance_time(w3, REVIEW_WINDOW_SKIP)
     result = operator.escrow.claim_approval(job_id, 0)
     claimed = operator.escrow.contract.events.MilestoneClaimed().process_receipt(
         result.receipt, errors=DISCARD
@@ -130,7 +132,8 @@ def run_permit_phase(
     )
 
     permit_deadline = int(w3.eth.get_block("latest")["timestamp"]) + 3600
-    v, r, s = sign_permit(payer, w3, token, escrow, MILESTONE, permit_deadline)
+    # No `version=`: resolve_permit_version reads the token's ERC-5267 descriptor.
+    v, r, s = sign_permit(payer, w3, token, escrow, MILESTONE_USDC, permit_deadline)
     checks.check(
         "permit signature has the expected shape",
         v in (27, 28) and len(r) == 32 and len(s) == 32,
@@ -140,7 +143,7 @@ def run_permit_phase(
     params = CreateParams(
         client=payer.address,
         provider=Web3.to_checksum_address(provider),
-        milestone_amounts=[MILESTONE],
+        milestone_amounts=[MILESTONE_USDC],
         deadline=int(w3.eth.get_block("latest")["timestamp"]) + 24 * 3600,
         terms_hash="PY_SDK_PERMIT_TERMS",
     )

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from web3 import Web3
 
+from ..amount import USDC_DECIMALS, UsdcAmount, format_usdc, parse_usdc, to_base_units
 from ..tx import TxResult
 from .base import ContractClient
 
@@ -13,7 +12,11 @@ __all__ = ["ERC20Client"]
 
 
 class ERC20Client(ContractClient):
-    """Approvals, balances and the `nonces`/`name` reads that permit signing needs."""
+    """Approvals, balances and the `nonces`/`name` reads that permit signing needs.
+
+    Writes take a USDC figure in dollars; reads return base units, which is what the chain stores.
+    :func:`nexusweb3.amount.format_usdc` turns one back into the other.
+    """
 
     def name(self) -> str:
         return str(self._call("name"))
@@ -39,21 +42,19 @@ class ERC20Client(ContractClient):
         """EIP-2612 permit nonce. Raises if the token does not implement it."""
         return int(self._call("nonces", Web3.to_checksum_address(owner)))
 
-    def approve(self, spender: str, value: int) -> TxResult:
-        return self._send("approve", Web3.to_checksum_address(spender), int(value))
+    def approve(self, spender: str, value: UsdcAmount) -> TxResult:
+        """Approve `value` USDC for `spender`, e.g. ``approve(escrow, "1000")``."""
+        return self._send("approve", Web3.to_checksum_address(spender), to_base_units(value))
 
-    def transfer(self, to: str, value: int) -> TxResult:
-        return self._send("transfer", Web3.to_checksum_address(to), int(value))
-
-    @staticmethod
-    def to_units(amount: float | int | str, decimals: int = 6) -> int:
-        """Convert a human amount ("100.50") into base units."""
-        scaled = Decimal(str(amount)) * (Decimal(10) ** decimals)
-        if scaled != scaled.to_integral_value():
-            raise ValueError(f"{amount} has more than {decimals} decimal places")
-        return int(scaled)
+    def transfer(self, to: str, value: UsdcAmount) -> TxResult:
+        return self._send("transfer", Web3.to_checksum_address(to), to_base_units(value))
 
     @staticmethod
-    def from_units(amount: int, decimals: int = 6) -> str:
-        """Format base units as a decimal string."""
-        return str(Decimal(int(amount)) / (Decimal(10) ** decimals))
+    def to_units(amount: UsdcAmount, decimals: int = USDC_DECIMALS) -> int:
+        """Convert a USDC figure ("100.50") into base units. Alias of :func:`parse_usdc`."""
+        return parse_usdc(str(amount), "amount", decimals)
+
+    @staticmethod
+    def from_units(amount: int, decimals: int = USDC_DECIMALS) -> str:
+        """Format base units as a USDC figure. Alias of :func:`format_usdc`."""
+        return format_usdc(int(amount), decimals)

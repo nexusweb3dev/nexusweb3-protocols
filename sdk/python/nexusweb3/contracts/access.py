@@ -24,6 +24,13 @@ class AccessClient(ContractClient):
     def revoke_operator(self, operator: str) -> TxResult:
         return self._send("revokeOperator", Web3.to_checksum_address(operator))
 
+    def renounce_operator(self, agent: str) -> TxResult:
+        """Signed by the operator itself: give up its own authorization for `agent`.
+
+        Lets a hot key that may have leaked cut itself off without waiting for the principal.
+        """
+        return self._send("renounceOperator", Web3.to_checksum_address(agent))
+
     def is_operator_for(self, agent: str, caller: str) -> bool:
         return bool(
             self._call("isOperatorFor", Web3.to_checksum_address(agent), Web3.to_checksum_address(caller))

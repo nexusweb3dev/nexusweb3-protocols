@@ -23,6 +23,14 @@ contract AgentAccess is IAgentAccess {
         emit OperatorRevoked(msg.sender, operator);
     }
 
+    function renounceOperator(address agent) external {
+        if (_expiry[agent][msg.sender] == 0) revert NotOperator(agent, msg.sender);
+        delete _expiry[agent][msg.sender];
+        emit OperatorRenounced(agent, msg.sender);
+    }
+
+    /// @notice True if `caller` is `agent` itself or a currently valid operator for `agent`.
+    ///         This view is authoritative; `operatorExpiry` may return a stale (expired) timestamp.
     function isOperatorFor(address agent, address caller) external view returns (bool) {
         if (caller == agent) return true;
         return _expiry[agent][caller] > block.timestamp;

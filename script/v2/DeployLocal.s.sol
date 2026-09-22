@@ -21,6 +21,8 @@ contract DeployLocal is DeployCore {
     ];
 
     function run() external override returns (Deployed memory d) {
+        require(block.chainid == 31_337, "DeployLocal: anvil only");
+
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(pk);
         address treasury = vm.envOr("TREASURY", deployer);
@@ -33,7 +35,7 @@ contract DeployLocal is DeployCore {
             usdc.mint(ANVIL[i], 1_000_000_000_000); // 1,000,000 USDC
         }
         d = _deploy(deployer, treasury, stakingRecipient, address(0), address(0), address(usdc), 5000, 5000);
-        _wire(d, escrowFeeBps);
+        _wire(d, address(0), escrowFeeBps);
         vm.stopBroadcast();
 
         console.log("MockUSDC          :", address(usdc));

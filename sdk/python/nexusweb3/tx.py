@@ -30,12 +30,20 @@ __all__ = ["TxResult", "TxSender", "GAS_BUFFER_NUMERATOR", "GAS_BUFFER_DENOMINAT
 
 @dataclass(frozen=True)
 class TxResult:
-    """Outcome of a successful write."""
+    """Outcome of a successful write.
+
+    The optional fields are filled in by the sub-client that knows which event the call emits:
+    `job_id` from `JobCreated`, `log_id` from `ActionLogged`, `to_provider` / `to_client` from
+    `JobExpired` and `withdrawn` from `ClaimableWithdrawn`.
+    """
 
     hash: str
     receipt: Any = field(repr=False)
     job_id: Optional[int] = None
     log_id: Optional[int] = None
+    to_provider: Optional[int] = None
+    to_client: Optional[int] = None
+    withdrawn: Optional[int] = None
 
     @property
     def block_number(self) -> int:

@@ -4,23 +4,28 @@ pragma solidity ^0.8.24;
 /// @title IAgentEscrowV2
 /// @notice Milestone escrow between a client (payer) and a provider (payee), optional arbiter.
 ///         Funds are pulled from the client principal; either party may act via operators.
-///         Absorbs v1 AgentEscrow, AgentMilestone and AgentMarket order flow.
 ///
 /// Lifecycle:
-///   createJob  -> Open
-///   provider submitMilestone(i)  (Pending -> Submitted)
+///   createJob                    -> Open (an OFFER: funds locked, provider not yet bound)
+///   provider acceptJob           -> Open + accepted (job is live; reputation/disputes now apply)
+///   client cancelJob             -> Cancelled, full refund (any time before acceptance; after
+///                                   acceptance only while no milestone has ever been submitted)
+///   provider submitMilestone(i)  (Pending -> Submitted; only while now <= deadline; at most
+///                                   MAX_REJECTIONS resubmissions after rejections)
 ///   client approveMilestone(i)   (-> Approved, pays provider minus fee; allowed even if not Submitted)
-///   client rejectMilestone(i)    (Submitted -> Pending, provider may resubmit)
-///   provider claimApproval(i)    (Submitted and unreviewed for REVIEW_WINDOW -> Approved; client silence = acceptance)
+///   client rejectMilestone(i)    (Submitted -> Pending; only inside the REVIEW_WINDOW)
+///   provider claimApproval(i)    (Submitted and unreviewed for REVIEW_WINDOW -> Approved)
 ///   all approved                 -> Completed
-///   client cancelJob             -> Cancelled (only while no milestone Submitted/Approved), full refund
-///   either party dispute         -> Disputed (requires arbiter != 0, only before the deadline)
+///   either party dispute         -> Disputed (requires arbiter != 0, accepted, before expiry)
 ///   arbiter resolve(providerBps) -> Resolved (remaining funds split)
-///   anyone refundExpired         -> Expired (after expiry, unreleased funds to client)
+///   anyone settleExpired         -> Expired: Submitted milestones pay the provider, Pending
+///                                   milestones refund the client. Open jobs after expiry;
+///                                   Disputed jobs after disputedAt + DISPUTE_GRACE.
 ///
-/// Expiry = max(deadline, latest Submitted milestone's submittedAt + REVIEW_WINDOW). Disputes are
-/// only possible before expiry; refundExpired only after it. A client who ignores a submission
-/// therefore cannot run out the clock: the provider can claim it after REVIEW_WINDOW.
+/// Expiry = max(deadline, latest Submitted milestone's submittedAt + REVIEW_WINDOW); since
+/// submissions stop at the deadline, expiry <= deadline + REVIEW_WINDOW. Submitted work is
+/// therefore always vested by the time anyone can settle, so "client silence = acceptance" is a
+/// property of the state, not a race.
 interface IAgentEscrowV2 {
     enum JobStatus {
         Open,
@@ -46,8 +51,11 @@ interface IAgentEscrowV2 {
         uint256 refunded; // returned to client
         uint48 deadline;
         uint48 createdAt;
+        uint48 acceptedAt; // 0 until the provider accepts
+        uint48 disputedAt; // 0 until disputed
         uint8 milestoneCount;
         uint8 approvedCount;
+        bool everSubmitted; // any milestone was ever submitted (blocks cancel)
         JobStatus status;
         bytes32 termsHash; // hash of off-chain terms document
     }
@@ -56,6 +64,7 @@ interface IAgentEscrowV2 {
         uint256 amount;
         bytes32 deliverableHash;
         uint48 submittedAt;
+        uint8 rejections;
         MilestoneStatus status;
     }
 
@@ -76,6 +85,7 @@ interface IAgentEscrowV2 {
         uint256 total,
         uint48 deadline
     );
+    event JobAccepted(uint256 indexed jobId);
     event MilestoneSubmitted(uint256 indexed jobId, uint8 indexed index, bytes32 deliverableHash);
     event MilestoneApproved(uint256 indexed jobId, uint8 indexed index, uint256 payout, uint256 fee);
     event MilestoneClaimed(uint256 indexed jobId, uint8 indexed index);
@@ -84,9 +94,9 @@ interface IAgentEscrowV2 {
     event JobCancelled(uint256 indexed jobId, uint256 refund);
     event JobDisputed(uint256 indexed jobId, address indexed by, bytes32 reasonHash);
     event JobResolved(uint256 indexed jobId, uint16 providerBps, uint256 toProvider, uint256 toClient, uint256 fee);
-    event JobExpired(uint256 indexed jobId, uint256 refund);
+    event JobExpired(uint256 indexed jobId, uint256 toProvider, uint256 toClient);
     event ClaimableAdded(address indexed account, uint256 amount);
-    event ClaimableWithdrawn(address indexed account, uint256 amount);
+    event ClaimableWithdrawn(address indexed account, address indexed to, uint256 amount);
     event FeeBpsUpdated(uint256 oldBps, uint256 newBps);
     event ModulesUpdated(address reputation, address auditLog, address killSwitch, address feeRouter);
 
@@ -103,16 +113,21 @@ interface IAgentEscrowV2 {
     error NotParty(uint256 jobId);
     error NotArbiter(uint256 jobId);
     error NoArbiter(uint256 jobId);
+    error NotAccepted(uint256 jobId);
+    error AlreadyAccepted(uint256 jobId);
     error CannotCancel(uint256 jobId);
     error DeadlineNotReached(uint256 jobId);
     error DeadlinePassed(uint256 jobId);
     error ReviewWindowOpen(uint256 jobId, uint8 index, uint48 claimableAt);
+    error ReviewWindowClosed(uint256 jobId, uint8 index);
+    error TooManyRejections(uint256 jobId, uint8 index);
     error InvalidBps(uint16 bps);
     error FeeTooHigh(uint256 bps);
     error NothingToClaim();
+    error ProviderInactive(address provider);
     error NotSelf();
     error InsufficientGas(uint256 required);
-    error ProviderInactive(address provider);
+    error TokenAmountMismatch(uint256 expected, uint256 received);
 
     // ─── Client (principal or operator) ─────────────────────────────────
     function createJob(CreateParams calldata p) external returns (uint256 jobId);
@@ -131,6 +146,8 @@ interface IAgentEscrowV2 {
     function cancelJob(uint256 jobId) external;
 
     // ─── Provider (principal or operator) ───────────────────────────────
+    /// @notice Bind the provider to the offer. Required before submitting; enables disputes/reputation.
+    function acceptJob(uint256 jobId) external;
     function submitMilestone(uint256 jobId, uint8 index, bytes32 deliverableHash) external;
     /// @notice Approve a milestone the client has left Submitted for longer than REVIEW_WINDOW.
     function claimApproval(uint256 jobId, uint8 index) external;
@@ -142,8 +159,10 @@ interface IAgentEscrowV2 {
     function resolve(uint256 jobId, uint16 providerBps) external;
 
     // ─── Anyone ─────────────────────────────────────────────────────────
-    function refundExpired(uint256 jobId) external;
-    function withdrawClaimable() external;
+    /// @notice Settle a job past its expiry (Open) or past disputedAt + DISPUTE_GRACE (Disputed).
+    function settleExpired(uint256 jobId) external;
+    /// @notice Withdraw parked funds of `account` to `to`. Callable by `account` or its operator.
+    function withdrawClaimable(address account, address to) external;
 
     // ─── Views ──────────────────────────────────────────────────────────
     function getJob(uint256 jobId) external view returns (Job memory);
@@ -151,7 +170,7 @@ interface IAgentEscrowV2 {
     function getJobsOf(address account, uint256 offset, uint256 limit) external view returns (uint256[] memory);
     function jobCountOf(address account) external view returns (uint256);
     function jobCount() external view returns (uint256);
-    /// @notice Timestamp after which refundExpired works and dispute no longer does.
+    /// @notice Timestamp after which settleExpired works and dispute no longer does (Open jobs).
     function expiryOf(uint256 jobId) external view returns (uint48);
     function claimable(address account) external view returns (uint256);
     function feeBps() external view returns (uint256);
@@ -163,5 +182,5 @@ interface IAgentEscrowV2 {
 
     // ─── Owner (governance) ─────────────────────────────────────────────
     function setFeeBps(uint256 newBps) external;
-    function setModules(address reputation, address auditLog, address killSwitch, address feeRouter) external;
+    function setModules(address reputation_, address auditLog_, address killSwitch_, address feeRouter_) external;
 }

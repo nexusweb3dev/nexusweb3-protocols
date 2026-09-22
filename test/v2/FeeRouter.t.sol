@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 import {MockReferral} from "./mocks/MockReferral.sol";
@@ -59,7 +60,16 @@ contract FeeRouterTest is Test {
         (uint16 s, uint16 t) = router.split();
         assertEq(s, STAKING_BPS);
         assertEq(t, TREASURY_BPS);
-        assertEq(usdc.allowance(address(router), address(referral)), type(uint256).max);
+        // FR-1: no standing allowance is granted at construction.
+        assertEq(usdc.allowance(address(router), address(referral)), 0);
+    }
+
+    function test_FR1_constructorGrantsNoStandingAllowance() public {
+        FeeRouter fresh = new FeeRouter(
+            IERC20(address(usdc)), owner, treasury, staking, address(referral), STAKING_BPS, TREASURY_BPS
+        );
+        assertEq(fresh.referral(), address(referral));
+        assertEq(usdc.allowance(address(fresh), address(referral)), 0);
     }
 
     function test_constructor_zeroReferralSkipsApproval() public {
@@ -121,6 +131,9 @@ contract FeeRouterTest is Test {
         referral.setShouldRevert(true);
         _fund(AMOUNT);
 
+        // FR-2: the failure is surfaced as an event instead of passing silently.
+        vm.expectEmit(true, false, false, true, address(router));
+        emit IFeeRouter.ReferralCallFailed(agent, AMOUNT);
         vm.expectEmit(true, true, false, true, address(router));
         emit IFeeRouter.FeeRouted(
             protocol, agent, AMOUNT, 0, (AMOUNT * STAKING_BPS) / BPS, (AMOUNT * TREASURY_BPS) / BPS
@@ -198,8 +211,10 @@ contract FeeRouterTest is Test {
         _route(agent, AMOUNT);
     }
 
-    function test_route_overPullingReferralIsClamped() public {
-        MockReferral greedy = new MockReferral(IERC20(address(usdc)), 20_000); // pulls 200% of the fee
+    /// @notice FR-1: a referral asking for 200% of the fee is stopped by the bounded allowance, so
+    ///         its whole `recordFee` reverts and nothing is paid out to it.
+    function test_FR1_overPullingReferralIsRejectedByBoundedAllowance() public {
+        MockReferral greedy = new MockReferral(IERC20(address(usdc)), 20_000); // asks for 200% of the fee
         greedy.setReferrer(agent, referrer);
         vm.prank(owner);
         router.setReferral(address(greedy));
@@ -207,11 +222,75 @@ contract FeeRouterTest is Test {
         _fund(AMOUNT * 3);
 
         vm.expectEmit(true, true, false, true, address(router));
-        emit IFeeRouter.FeeRouted(protocol, agent, AMOUNT, AMOUNT, 0, 0);
+        emit IFeeRouter.FeeRouted(
+            protocol, agent, AMOUNT, 0, (AMOUNT * STAKING_BPS) / BPS, (AMOUNT * TREASURY_BPS) / BPS
+        );
         _route(agent, AMOUNT);
 
+        assertEq(usdc.balanceOf(address(greedy)), 0);
+        assertEq(usdc.balanceOf(staking), (AMOUNT * STAKING_BPS) / BPS);
+        assertEq(usdc.balanceOf(treasury), (AMOUNT * TREASURY_BPS) / BPS);
+        assertEq(usdc.balanceOf(address(router)), AMOUNT * 2);
+    }
+
+    /// @notice FR-1: a referral that takes its full fee and then reaches for the router's remaining
+    ///         balance gets exactly `amount` and nothing more.
+    function test_FR1_referralCannotReachSurplusBeyondRoutedAmount() public {
+        SurplusGrabbingReferral grabber = new SurplusGrabbingReferral(IERC20(address(usdc)));
+        vm.prank(owner);
+        router.setReferral(address(grabber));
+
+        _fund(AMOUNT * 3);
+        _route(agent, AMOUNT);
+
+        assertFalse(grabber.extraPullSucceeded());
+        assertEq(usdc.balanceOf(address(grabber)), AMOUNT);
+        assertEq(usdc.balanceOf(address(router)), AMOUNT * 2);
         assertEq(usdc.balanceOf(staking), 0);
         assertEq(usdc.balanceOf(treasury), 0);
+    }
+
+    /// @notice FR-1: the per-call allowance is revoked on the way out, on both branches.
+    function test_FR1_allowanceIsZeroedAfterRoute() public {
+        referral.setReferrer(agent, referrer);
+        _fund(AMOUNT);
+        _route(agent, AMOUNT);
+        assertEq(usdc.allowance(address(router), address(referral)), 0);
+    }
+
+    function test_FR1_allowanceIsZeroedAfterFailedReferralCall() public {
+        referral.setShouldRevert(true);
+        _fund(AMOUNT);
+        _route(agent, AMOUNT);
+        assertEq(usdc.allowance(address(router), address(referral)), 0);
+    }
+
+    /// @notice FR-2: a reverting referral emits `ReferralCallFailed` and routing still completes.
+    function test_FR2_revertingReferralEmitsReferralCallFailed() public {
+        referral.setReferrer(agent, referrer);
+        referral.setShouldRevert(true);
+        _fund(AMOUNT);
+
+        vm.expectEmit(true, false, false, true, address(router));
+        emit IFeeRouter.ReferralCallFailed(agent, AMOUNT);
+        _route(agent, AMOUNT);
+
+        assertEq(usdc.balanceOf(address(referral)), 0);
+        assertEq(usdc.balanceOf(staking) + usdc.balanceOf(treasury), AMOUNT);
+    }
+
+    /// @notice FR-2: a healthy referral must not emit the failure event.
+    function test_FR2_successfulReferralEmitsNoFailure() public {
+        referral.setReferrer(agent, referrer);
+        _fund(AMOUNT);
+
+        vm.recordLogs();
+        _route(agent, AMOUNT);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            assertTrue(logs[i].topics[0] != IFeeRouter.ReferralCallFailed.selector);
+        }
     }
 
     function test_route_twiceAccumulates() public {
@@ -311,7 +390,8 @@ contract FeeRouterTest is Test {
 
     // ─── setReferral ────────────────────────────────────────────────────
 
-    function test_setReferral_movesAllowance() public {
+    /// @notice FR-1: swapping the referral revokes the old allowance and grants no new standing one.
+    function test_FR1_setReferralRevokesOldAndGrantsNoStandingAllowance() public {
         MockReferral next = new MockReferral(IERC20(address(usdc)), REFERRAL_BPS);
 
         vm.expectEmit(true, false, false, false, address(router));
@@ -321,7 +401,7 @@ contract FeeRouterTest is Test {
 
         assertEq(router.referral(), address(next));
         assertEq(usdc.allowance(address(router), address(referral)), 0);
-        assertEq(usdc.allowance(address(router), address(next)), type(uint256).max);
+        assertEq(usdc.allowance(address(router), address(next)), 0);
     }
 
     function test_setReferral_disableZeroesAllowance() public {
@@ -332,13 +412,13 @@ contract FeeRouterTest is Test {
         assertEq(usdc.allowance(address(router), address(referral)), 0);
     }
 
-    function test_setReferral_enableFromZeroGrantsMax() public {
+    function test_FR1_setReferralEnableFromZeroGrantsNothing() public {
         vm.startPrank(owner);
         router.setReferral(address(0));
         router.setReferral(address(referral));
         vm.stopPrank();
 
-        assertEq(usdc.allowance(address(router), address(referral)), type(uint256).max);
+        assertEq(usdc.allowance(address(router), address(referral)), 0);
     }
 
     function test_revert_setReferralNotOwner() public {
@@ -440,5 +520,86 @@ contract FeeRouterTest is Test {
 
         assertEq(before - usdc.balanceOf(address(router)), amount);
         assertEq(usdc.balanceOf(address(router)), surplus);
+    }
+
+    // ─── H-02: two-step ownership ───────────────────────────────────────
+
+    /// @notice H-02: `transferOwnership` only proposes. A mistyped owner cannot brick the contract
+    ///         because the current owner keeps every power until the new one accepts.
+    function test_H02_transferOwnershipOnlyProposes() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        router.transferOwnership(newOwner);
+
+        assertEq(router.owner(), owner);
+        assertEq(router.pendingOwner(), newOwner);
+    }
+
+    /// @notice H-02: ownership moves only once the proposed owner accepts.
+    function test_H02_acceptOwnershipCompletesTransfer() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        router.transferOwnership(newOwner);
+
+        vm.prank(newOwner);
+        router.acceptOwnership();
+
+        assertEq(router.owner(), newOwner);
+        assertEq(router.pendingOwner(), address(0));
+    }
+
+    /// @notice H-02: nobody but the proposed owner can accept.
+    function test_H02_revert_acceptOwnershipByStranger() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        router.transferOwnership(newOwner);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        router.acceptOwnership();
+
+        assertEq(router.owner(), owner);
+    }
+
+    /// @notice H-02: a typo'd proposal is recoverable — the real owner just re-proposes.
+    function test_H02_pendingOwnerCanBeReplacedBeforeAcceptance() public {
+        address typo = makeAddr("typo");
+        address newOwner = makeAddr("newOwner");
+
+        vm.startPrank(owner);
+        router.transferOwnership(typo);
+        router.transferOwnership(newOwner);
+        vm.stopPrank();
+
+        assertEq(router.pendingOwner(), newOwner);
+
+        vm.prank(typo);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, typo));
+        router.acceptOwnership();
+    }
+}
+
+/// @notice FR-1 probe: takes the full fee it was offered, then immediately tries to take the same
+///         amount again from whatever else the router is holding.
+contract SurplusGrabbingReferral {
+    using SafeERC20 for IERC20;
+
+    IERC20 public immutable token;
+    bool public extraPullSucceeded;
+
+    constructor(IERC20 token_) {
+        token = token_;
+    }
+
+    function recordFee(address, uint256 feeAmount, address) external payable {
+        token.safeTransferFrom(msg.sender, address(this), feeAmount);
+        try token.transferFrom(msg.sender, address(this), feeAmount) returns (bool ok) {
+            extraPullSucceeded = ok;
+        } catch {
+            extraPullSucceeded = false;
+        }
     }
 }

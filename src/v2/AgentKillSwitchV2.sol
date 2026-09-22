@@ -2,14 +2,17 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IAgentKillSwitchV2} from "./interfaces/IAgentKillSwitchV2.sol";
 
 /// @title AgentKillSwitchV2
 /// @notice Opt-in spending guard for AI agents, enforced by authorized protocols via `consume`.
 /// @dev Deliberately NOT Pausable: a global owner pause must never be able to freeze the spending
-///      of every registered agent. The contract holds no ETH and charges no fees. Config changes are
-///      principal-only (`msg.sender` is the agent) so operator hot keys can never widen limits.
-contract AgentKillSwitchV2 is Ownable, IAgentKillSwitchV2 {
+///      of every registered agent. The contract holds no ETH and charges no fees. Config changes and
+///      session resets are principal-only (`msg.sender` is the agent) so neither an operator hot key
+///      nor a guardian can widen limits or refresh spending headroom. A guardian may only restrict:
+///      kill, pause and unpause.
+contract AgentKillSwitchV2 is Ownable2Step, IAgentKillSwitchV2 {
     /// @notice Inclusive bounds on the session length a principal may configure.
     uint48 public constant MIN_SESSION_DURATION = 1 hours;
     uint48 public constant MAX_SESSION_DURATION = 365 days;
@@ -29,6 +32,11 @@ contract AgentKillSwitchV2 is Ownable, IAgentKillSwitchV2 {
 
     modifier onlyPrincipalOrGuardian(address agent) {
         _requirePrincipalOrGuardian(agent);
+        _;
+    }
+
+    modifier onlyPrincipal(address agent) {
+        if (msg.sender != agent) revert NotPrincipal(agent, msg.sender);
         _;
     }
 
@@ -74,11 +82,20 @@ contract AgentKillSwitchV2 is Ownable, IAgentKillSwitchV2 {
         emit LimitsUpdated(msg.sender, spendingLimit, txLimit, sessionDuration);
     }
 
-    /// @notice Set or clear the caller's guardian, which may kill, pause, unpause and reset sessions.
+    /// @notice Set or clear the caller's guardian, which may kill, pause and unpause the agent.
+    /// @dev A guardian can only restrict spending; it can never reset a session or change limits.
     /// @param guardian Guardian address; the zero address clears the current guardian.
     function setGuardian(address guardian) external onlyRegistered(msg.sender) {
         _guardians[msg.sender] = guardian;
         emit GuardianSet(msg.sender, guardian);
+    }
+
+    /// @notice Zero the session counters for `agent` and start a fresh session now.
+    /// @dev Principal-only: a session reset restores spending headroom, so a guardian (a restrict-only
+    ///      role) must not be able to call it.
+    /// @param agent Agent whose session is reset; must be the caller.
+    function resetSession(address agent) external onlyRegistered(agent) onlyPrincipal(agent) {
+        _rollSession(_configs[agent], agent);
     }
 
     /// @notice Clear the caller's killed flag. Only the principal can un-kill an agent.
@@ -118,12 +135,6 @@ contract AgentKillSwitchV2 is Ownable, IAgentKillSwitchV2 {
         emit AgentUnpaused(agent, msg.sender);
     }
 
-    /// @notice Zero the session counters for `agent` and start a fresh session now.
-    /// @param agent Agent whose session is reset.
-    function resetSession(address agent) external onlyRegistered(agent) onlyPrincipalOrGuardian(agent) {
-        _rollSession(_configs[agent], agent);
-    }
-
     // ─── Authorized protocols ───────────────────────────────────────────
 
     /// @notice Enforce limits for `agent` spending `amount` and record the usage.
@@ -143,9 +154,13 @@ contract AgentKillSwitchV2 is Ownable, IAgentKillSwitchV2 {
         if (c.killed) revert AgentIsKilled(agent);
         if (c.paused) revert AgentIsPaused(agent);
 
-        uint256 newSpent = uint256(c.spent) + amount;
-        if (newSpent > c.spendingLimit) {
-            revert SpendingLimitExceeded(agent, amount, uint256(c.spendingLimit) - uint256(c.spent));
+        uint256 limit = uint256(c.spendingLimit);
+        uint256 spent = uint256(c.spent);
+        uint256 newSpent = spent + amount;
+        if (newSpent > limit) {
+            // `setLimits` can lower the limit below the amount already spent, so the headroom is
+            // clamped at zero instead of underflowing.
+            revert SpendingLimitExceeded(agent, amount, limit > spent ? limit - spent : 0);
         }
         if (c.txLimit != 0 && uint256(c.txCount) + 1 > uint256(c.txLimit)) {
             revert TxLimitExceeded(agent, c.txLimit);
@@ -196,14 +211,17 @@ contract AgentKillSwitchV2 is Ownable, IAgentKillSwitchV2 {
     }
 
     /// @notice Spend still available to `agent` in its current session.
-    /// @dev Unregistered agents have no limit; an expired session reports the full limit.
+    /// @dev Unregistered agents have no limit; an expired session reports the full limit. Returns 0
+    ///      rather than reverting when `setLimits` has lowered the limit below the amount spent.
     /// @param agent Agent to query.
     /// @return Remaining spendable amount in 6-decimal USDC units.
     function remainingSpend(address agent) external view returns (uint256) {
         AgentConfig storage c = _configs[agent];
         if (!c.registered) return type(uint256).max;
         if (block.timestamp >= uint256(c.sessionStart) + uint256(c.sessionDuration)) return c.spendingLimit;
-        return uint256(c.spendingLimit) - uint256(c.spent);
+        uint256 limit = uint256(c.spendingLimit);
+        uint256 spent = uint256(c.spent);
+        return limit > spent ? limit - spent : 0;
     }
 
     /// @notice Guardian currently set for `agent`, or the zero address when none is set.

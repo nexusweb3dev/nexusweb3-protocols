@@ -1,5 +1,6 @@
 import { getContract, type Address } from 'viem';
 import { AgentKillSwitchV2Abi } from '../abis/AgentKillSwitchV2.js';
+import { toBaseUnits, type UsdcAmount } from '../amount.js';
 import { sendWrite, type Context } from '../internal.js';
 import type { KillSwitchConfig, TxResult } from '../types.js';
 
@@ -9,9 +10,9 @@ import type { KillSwitchConfig, TxResult } from '../types.js';
  * accept the configured guardian).
  */
 export interface KillSwitchModule {
-  /** Opt in. `spendingLimit` is in payment-token units per session, `txLimit` 0 = unlimited. */
-  register(spendingLimit: bigint, txLimit: number, sessionDuration: number): Promise<TxResult>;
-  setLimits(spendingLimit: bigint, txLimit: number, sessionDuration: number): Promise<TxResult>;
+  /** Opt in. `spendingLimit` is human USDC per session, `txLimit` 0 = unlimited. */
+  register(spendingLimit: UsdcAmount, txLimit: number, sessionDuration: number): Promise<TxResult>;
+  setLimits(spendingLimit: UsdcAmount, txLimit: number, sessionDuration: number): Promise<TxResult>;
   setGuardian(guardian: Address): Promise<TxResult>;
   /** Principal or guardian: block every guarded spend for `agent`. */
   kill(agent: Address): Promise<TxResult>;
@@ -19,11 +20,19 @@ export interface KillSwitchModule {
   unpause(agent: Address): Promise<TxResult>;
   /** Principal only: undo a kill. */
   resume(): Promise<TxResult>;
+  /**
+   * Principal only: zero the session counters and start a fresh session. A reset restores
+   * spending headroom, so neither an operator nor the restrict-only guardian may call it —
+   * the wallet must be the agent principal itself or the call reverts with `NotPrincipal`.
+   */
   resetSession(agent: Address): Promise<TxResult>;
   /** !killed && !paused. True for unregistered agents. */
   isActive(agent: Address): Promise<boolean>;
   getConfig(agent: Address): Promise<KillSwitchConfig>;
-  /** Spend left in the current session; uint256 max when unregistered. */
+  /**
+   * Spend left in the current session, in base units; uint256 max when unregistered, 0 when the
+   * limit was lowered below what the session already spent. Never reverts.
+   */
   remainingSpend(agent: Address): Promise<bigint>;
   guardianOf(agent: Address): Promise<Address>;
 }
@@ -34,10 +43,12 @@ export function createKillSwitchModule(ctx: Context): KillSwitchModule {
 
   return {
     async register(spendingLimit, txLimit, sessionDuration) {
-      return sendWrite(ctx, address, AgentKillSwitchV2Abi, 'register', [spendingLimit, txLimit, sessionDuration]);
+      const limit = toBaseUnits(spendingLimit, 'spendingLimit');
+      return sendWrite(ctx, address, AgentKillSwitchV2Abi, 'register', [limit, txLimit, sessionDuration]);
     },
     async setLimits(spendingLimit, txLimit, sessionDuration) {
-      return sendWrite(ctx, address, AgentKillSwitchV2Abi, 'setLimits', [spendingLimit, txLimit, sessionDuration]);
+      const limit = toBaseUnits(spendingLimit, 'spendingLimit');
+      return sendWrite(ctx, address, AgentKillSwitchV2Abi, 'setLimits', [limit, txLimit, sessionDuration]);
     },
     async setGuardian(guardian) {
       return sendWrite(ctx, address, AgentKillSwitchV2Abi, 'setGuardian', [guardian]);

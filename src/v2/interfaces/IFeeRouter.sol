@@ -22,6 +22,8 @@ interface IFeeRouter {
     event SplitUpdated(uint16 stakingBps, uint16 treasuryBps);
     event RecipientsUpdated(address indexed treasury, address indexed stakingRecipient);
     event ReferralUpdated(address indexed referral);
+    /// @notice The referral sink reverted during `route`; routing continued with no referral payout.
+    event ReferralCallFailed(address indexed agent, uint256 amount);
     event ProtocolAuthorized(address indexed protocol);
     event ProtocolRevoked(address indexed protocol);
 

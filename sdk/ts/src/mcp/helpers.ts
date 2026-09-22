@@ -1,4 +1,5 @@
 import { getAddress, isAddress, type Address, type Hex } from 'viem';
+import { parseUsdc } from '../amount.js';
 import { NexusError } from '../types.js';
 import type { McpRuntime } from './config.js';
 
@@ -40,11 +41,12 @@ export function parseAddress(value: string, label: string): Address {
   return getAddress(value);
 }
 
+/**
+ * Every amount crossing this server is a human USDC string — `"100.50"` is one hundred dollars
+ * fifty, never base units. One rule for the whole tool surface, so a model cannot be off by 1e6.
+ */
 export function parseAmount(value: string, label: string): bigint {
-  if (!/^\d+$/.test(value)) {
-    throw new NexusError(`${label} must be an integer in token base units (USDC: 6 decimals), got "${value}"`);
-  }
-  return BigInt(value);
+  return parseUsdc(value, label);
 }
 
 export function parseBytes32(value: string, label: string): Hex {

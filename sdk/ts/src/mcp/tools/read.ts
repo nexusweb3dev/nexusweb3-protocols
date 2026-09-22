@@ -1,7 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { formatUsdc } from '../../amount.js';
 import type { McpRuntime } from '../config.js';
 import { guard, parseAddress, resolveAgent } from '../helpers.js';
+
+/** uint256 max: what `remainingSpend` returns for an agent with no kill-switch limits. */
+const UNLIMITED = (1n << 256n) - 1n;
 
 const agentArg = z.string().optional().describe('Agent principal address. Defaults to NEXUS_PRINCIPAL.');
 const offsetArg = z.number().int().min(0).default(0).describe('Page offset.');
@@ -44,7 +48,12 @@ export function registerReadTools(server: McpServer, runtime: McpRuntime): void 
           client.reputation.getTier(address),
           client.reputation.getStats(address),
         ]);
-        return { agent: address, score, tier, stats };
+        return {
+          agent: address,
+          score,
+          tier,
+          stats: { ...stats, volumeUsdc: formatUsdc(stats.volumeUsdc) },
+        };
       }),
   );
 
@@ -52,7 +61,9 @@ export function registerReadTools(server: McpServer, runtime: McpRuntime): void 
     'nexus_escrow_get_job',
     {
       title: 'Get escrow job',
-      description: 'Read one escrow job with its milestones. Status comes back as a name, not a number.',
+      description:
+        'Read one escrow job with its milestones. Status comes back as a name, not a number, and ' +
+        'every amount is reported in USDC alongside its raw base-unit value.',
       inputSchema: { jobId: z.number().int().min(0).describe('Job id.') },
     },
     async ({ jobId }) =>
@@ -62,7 +73,20 @@ export function registerReadTools(server: McpServer, runtime: McpRuntime): void 
           client.escrow.getJob(id),
           client.escrow.getMilestones(id),
         ]);
-        return { jobId: id, job, milestones };
+        // Amounts go out as USDC so a model can hand them straight back to a write tool.
+        return {
+          jobId: id,
+          job: {
+            ...job,
+            totalUsdc: formatUsdc(job.total),
+            releasedUsdc: formatUsdc(job.released),
+            refundedUsdc: formatUsdc(job.refunded),
+          },
+          milestones: milestones.map((milestone) => ({
+            ...milestone,
+            amountUsdc: formatUsdc(milestone.amount),
+          })),
+        };
       }),
   );
 
@@ -92,7 +116,9 @@ export function registerReadTools(server: McpServer, runtime: McpRuntime): void 
     'nexus_killswitch_status',
     {
       title: 'Get kill-switch status',
-      description: 'Read the spending guard for an agent: active flag, session limits and remaining spend.',
+      description:
+        'Read the spending guard for an agent: active flag, session limits and remaining spend. ' +
+        'Amounts are in USDC.',
       inputSchema: { agent: agentArg },
     },
     async ({ agent }) =>
@@ -104,7 +130,17 @@ export function registerReadTools(server: McpServer, runtime: McpRuntime): void 
           client.killSwitch.remainingSpend(address),
           client.killSwitch.guardianOf(address),
         ]);
-        return { agent: address, active, remainingSpend: remaining, guardian, config };
+        return {
+          agent: address,
+          active,
+          remainingSpendUsdc: remaining === UNLIMITED ? 'unlimited' : formatUsdc(remaining),
+          guardian,
+          config: {
+            ...config,
+            spendingLimitUsdc: formatUsdc(config.spendingLimit),
+            spentUsdc: formatUsdc(config.spent),
+          },
+        };
       }),
   );
 

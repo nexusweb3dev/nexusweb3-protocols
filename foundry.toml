@@ -26,3 +26,9 @@ number_underscore = "thousands"
 mainnet = "${ETH_RPC_URL}"
 arbitrum = "${ARBITRUM_RPC_URL}"
 base = "${BASE_RPC_URL}"
+
+[invariant]
+runs = 256
+depth = 64
+fail_on_revert = false
+call_override = false

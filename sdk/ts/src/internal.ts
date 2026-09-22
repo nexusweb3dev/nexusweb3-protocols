@@ -26,12 +26,15 @@ import {
  */
 export const DEFAULT_GAS_MULTIPLIER = 1.5;
 
+/** Upper bound on {@link NexusClientConfig.gasMultiplier}, so a bad config cannot ask for an absurd gas limit. */
+export const MAX_GAS_MULTIPLIER = 5;
+
 export interface NexusClientConfig {
   publicClient: NexusPublicClient;
   /** Required for every write; omit for a read-only client. */
   walletClient?: NexusWalletClient;
   addresses: Addresses;
-  /** Gas-estimate multiplier for writes. Default {@link DEFAULT_GAS_MULTIPLIER}; must be >= 1. */
+  /** Gas-estimate multiplier for writes. Default {@link DEFAULT_GAS_MULTIPLIER}; 1..{@link MAX_GAS_MULTIPLIER}. */
   gasMultiplier?: number;
 }
 
@@ -50,8 +53,10 @@ export interface Context {
 export function createContext(config: NexusClientConfig): Context {
   const { publicClient, walletClient, addresses } = config;
   const gasMultiplier = config.gasMultiplier ?? DEFAULT_GAS_MULTIPLIER;
-  if (!Number.isFinite(gasMultiplier) || gasMultiplier < 1) {
-    throw new NexusError(`gasMultiplier must be a finite number >= 1, got ${String(config.gasMultiplier)}`);
+  if (!Number.isFinite(gasMultiplier) || gasMultiplier < 1 || gasMultiplier > MAX_GAS_MULTIPLIER) {
+    throw new NexusError(
+      `gasMultiplier must be a finite number between 1 and ${MAX_GAS_MULTIPLIER}, got ${String(config.gasMultiplier)}`,
+    );
   }
 
   return {

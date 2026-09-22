@@ -128,7 +128,46 @@ export const AgentEscrowV2Abi = [
   },
   {
     "type": "function",
+    "name": "MAX_REJECTIONS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_REPUTATION_PER_PAIR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIN_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_REPUTATION_VALUE",
     "inputs": [],
     "outputs": [
       {
@@ -164,6 +203,26 @@ export const AgentEscrowV2Abi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "acceptJob",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "acceptOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -501,6 +560,16 @@ export const AgentEscrowV2Abi = [
             "internalType": "uint48"
           },
           {
+            "name": "acceptedAt",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "disputedAt",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
             "name": "milestoneCount",
             "type": "uint8",
             "internalType": "uint8"
@@ -509,6 +578,11 @@ export const AgentEscrowV2Abi = [
             "name": "approvedCount",
             "type": "uint8",
             "internalType": "uint8"
+          },
+          {
+            "name": "everSubmitted",
+            "type": "bool",
+            "internalType": "bool"
           },
           {
             "name": "status",
@@ -584,6 +658,11 @@ export const AgentEscrowV2Abi = [
             "name": "submittedAt",
             "type": "uint48",
             "internalType": "uint48"
+          },
+          {
+            "name": "rejections",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
             "name": "status",
@@ -688,16 +767,16 @@ export const AgentEscrowV2Abi = [
   },
   {
     "type": "function",
-    "name": "refundExpired",
-    "inputs": [
+    "name": "pendingOwner",
+    "inputs": [],
+    "outputs": [
       {
-        "name": "jobId",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -821,6 +900,19 @@ export const AgentEscrowV2Abi = [
   },
   {
     "type": "function",
+    "name": "settleExpired",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "submitMilestone",
     "inputs": [
       {
@@ -865,7 +957,18 @@ export const AgentEscrowV2Abi = [
   {
     "type": "function",
     "name": "withdrawClaimable",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -899,6 +1002,12 @@ export const AgentEscrowV2Abi = [
         "internalType": "address"
       },
       {
+        "name": "to",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
         "name": "amount",
         "type": "uint256",
         "indexed": false,
@@ -921,6 +1030,19 @@ export const AgentEscrowV2Abi = [
         "name": "newBps",
         "type": "uint256",
         "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "JobAccepted",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "indexed": true,
         "internalType": "uint256"
       }
     ],
@@ -1037,7 +1159,13 @@ export const AgentEscrowV2Abi = [
         "internalType": "uint256"
       },
       {
-        "name": "refund",
+        "name": "toProvider",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "toClient",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -1215,6 +1343,25 @@ export const AgentEscrowV2Abi = [
   },
   {
     "type": "event",
+    "name": "OwnershipTransferStarted",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "OwnershipTransferred",
     "inputs": [
       {
@@ -1257,6 +1404,17 @@ export const AgentEscrowV2Abi = [
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AlreadyAccepted",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1389,6 +1547,17 @@ export const AgentEscrowV2Abi = [
   },
   {
     "type": "error",
+    "name": "NotAccepted",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "NotAgentOrOperator",
     "inputs": [
       {
@@ -1497,6 +1666,22 @@ export const AgentEscrowV2Abi = [
   },
   {
     "type": "error",
+    "name": "ReviewWindowClosed",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "index",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ReviewWindowOpen",
     "inputs": [
       {
@@ -1524,6 +1709,38 @@ export const AgentEscrowV2Abi = [
         "name": "token",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TokenAmountMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "received",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyRejections",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "index",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ]
   },

@@ -11,6 +11,7 @@ import type {
   WalletClient,
 } from 'viem';
 import { hexToString, stringToHex } from 'viem';
+import type { UsdcAmount } from './amount.js';
 import type { AgentAuditLogV2Abi } from './abis/AgentAuditLogV2.js';
 import type { AgentEscrowV2Abi } from './abis/AgentEscrowV2.js';
 import type { AgentIdentityV2Abi } from './abis/AgentIdentityV2.js';
@@ -46,6 +47,19 @@ export interface CreateJobResult extends TxResult {
 
 export interface LogActionResult extends TxResult {
   logId: bigint;
+}
+
+/** Outcome of `escrow.settleExpired`, decoded from `JobExpired`. */
+export interface SettleExpiredResult extends TxResult {
+  /** Gross amount vested to the provider: every milestone that was still Submitted. */
+  toProvider: bigint;
+  /** Amount refunded to the client: everything that was still Pending. */
+  toClient: bigint;
+}
+
+/** Outcome of `escrow.withdrawClaimable`, decoded from `ClaimableWithdrawn`. */
+export interface WithdrawClaimableResult extends TxResult {
+  amount: bigint;
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────
@@ -113,8 +127,11 @@ export interface CreateJobParams {
   provider: Address;
   /** Optional dispute arbiter. Omit (or zero address) for the deadline-refund path only. */
   arbiter?: Address;
-  /** 1..20 milestone amounts in payment-token units (USDC: 6 decimals). Each must be > 0. */
-  milestoneAmounts: readonly bigint[];
+  /**
+   * 1..20 milestone amounts, each greater than zero. Human USDC strings (`'100.50'`); a bigint
+   * is accepted when you already hold base units. See {@link UsdcAmount}.
+   */
+  milestoneAmounts: readonly UsdcAmount[];
   /** Unix seconds; must be now + 1h .. now + 365d. */
   deadline: number;
   /** keccak256 of the off-chain terms document. Defaults to bytes32(0). */

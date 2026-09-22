@@ -369,18 +369,51 @@ contract AgentKillSwitchV2Test is Test {
         assertEq(c.sessionStart, uint48(block.timestamp));
     }
 
-    function test_resetSessionByGuardian() public {
+    /// @notice KS-2: a guardian is a restrict-only role. Resetting a session hands the agent fresh
+    ///         spending headroom, so the guardian must not be able to do it.
+    function test_KS2_revert_resetSessionByGuardian() public {
         _withGuardian();
         _consume(500);
+
         vm.prank(guardian);
+        vm.expectRevert(abi.encodeWithSelector(IAgentKillSwitchV2.NotPrincipal.selector, agent, guardian));
         ks.resetSession(agent);
+
+        assertEq(ks.getConfig(agent).spent, 500);
+    }
+
+    /// @notice KS-2: the principal keeps the ability to reset its own session.
+    function test_KS2_resetSessionByPrincipalStillWorks() public {
+        _withGuardian();
+        _consume(500);
+
+        vm.prank(agent);
+        ks.resetSession(agent);
+
         assertEq(ks.getConfig(agent).spent, 0);
     }
 
-    function test_revert_resetSessionByOperator() public {
+    /// @notice KS-2: the guardian keeps every restricting power it had.
+    function test_KS2_guardianRetainsKillPauseUnpause() public {
+        _withGuardian();
+
+        vm.prank(guardian);
+        ks.pause(agent);
+        assertTrue(ks.getConfig(agent).paused);
+
+        vm.prank(guardian);
+        ks.unpause(agent);
+        assertFalse(ks.getConfig(agent).paused);
+
+        vm.prank(guardian);
+        ks.kill(agent);
+        assertTrue(ks.getConfig(agent).killed);
+    }
+
+    function test_KS2_revert_resetSessionByOperator() public {
         _register();
         vm.prank(operator);
-        vm.expectRevert(abi.encodeWithSelector(IAgentKillSwitchV2.NotPrincipalOrGuardian.selector, agent, operator));
+        vm.expectRevert(abi.encodeWithSelector(IAgentKillSwitchV2.NotPrincipal.selector, agent, operator));
         ks.resetSession(agent);
     }
 
@@ -621,11 +654,112 @@ contract AgentKillSwitchV2Test is Test {
         }
     }
 
+    /// @notice KS-1: `setLimits` can drop the limit below what the session already spent. The view
+    ///         must clamp at zero instead of reverting with an arithmetic panic.
+    function test_KS1_remainingSpendIsZeroWhenLimitLoweredBelowSpent() public {
+        _register();
+        _consume(500);
+
+        vm.prank(agent);
+        ks.setLimits(100, TX_LIMIT, SESSION);
+
+        assertEq(ks.remainingSpend(agent), 0);
+    }
+
+    /// @notice KS-1: `consume` must reject the spend with a typed error, not an arithmetic panic.
+    function test_KS1_consumeRevertsWithZeroRemainingWhenLimitLoweredBelowSpent() public {
+        _register();
+        _consume(500);
+
+        vm.prank(agent);
+        ks.setLimits(100, TX_LIMIT, SESSION);
+
+        vm.prank(protocol);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAgentKillSwitchV2.SpendingLimitExceeded.selector, agent, uint256(1), uint256(0))
+        );
+        ks.consume(agent, 1);
+    }
+
+    /// @notice KS-1: an expired session still rolls first, so the lowered limit applies cleanly.
+    function test_KS1_loweredLimitAppliesAfterSessionRoll() public {
+        _register();
+        _consume(500);
+
+        vm.prank(agent);
+        ks.setLimits(100, TX_LIMIT, SESSION);
+
+        vm.warp(block.timestamp + SESSION);
+        assertEq(ks.remainingSpend(agent), 100);
+
+        _consume(100);
+        assertEq(ks.remainingSpend(agent), 0);
+    }
+
     function testFuzz_onlyPrincipalOrGuardianCanKill(address caller) public {
         _withGuardian();
         vm.assume(caller != agent && caller != guardian);
         vm.prank(caller);
         vm.expectRevert(abi.encodeWithSelector(IAgentKillSwitchV2.NotPrincipalOrGuardian.selector, agent, caller));
         ks.kill(agent);
+    }
+
+    // ─── H-02: two-step ownership ───────────────────────────────────────
+
+    /// @notice H-02: `transferOwnership` only proposes. A mistyped owner cannot brick the contract
+    ///         because the current owner keeps every power until the new one accepts.
+    function test_H02_transferOwnershipOnlyProposes() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        ks.transferOwnership(newOwner);
+
+        assertEq(ks.owner(), owner);
+        assertEq(ks.pendingOwner(), newOwner);
+    }
+
+    /// @notice H-02: ownership moves only once the proposed owner accepts.
+    function test_H02_acceptOwnershipCompletesTransfer() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        ks.transferOwnership(newOwner);
+
+        vm.prank(newOwner);
+        ks.acceptOwnership();
+
+        assertEq(ks.owner(), newOwner);
+        assertEq(ks.pendingOwner(), address(0));
+    }
+
+    /// @notice H-02: nobody but the proposed owner can accept.
+    function test_H02_revert_acceptOwnershipByStranger() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        ks.transferOwnership(newOwner);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        ks.acceptOwnership();
+
+        assertEq(ks.owner(), owner);
+    }
+
+    /// @notice H-02: a typo'd proposal is recoverable — the real owner just re-proposes.
+    function test_H02_pendingOwnerCanBeReplacedBeforeAcceptance() public {
+        address typo = makeAddr("typo");
+        address newOwner = makeAddr("newOwner");
+
+        vm.startPrank(owner);
+        ks.transferOwnership(typo);
+        ks.transferOwnership(newOwner);
+        vm.stopPrank();
+
+        assertEq(ks.pendingOwner(), newOwner);
+
+        vm.prank(typo);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, typo));
+        ks.acceptOwnership();
     }
 }

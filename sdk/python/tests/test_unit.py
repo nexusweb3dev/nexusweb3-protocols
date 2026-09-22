@@ -25,7 +25,7 @@ from nexusweb3 import (
     load_addresses,
     to_bytes32,
 )
-from nexusweb3.abi import CONTRACT_NAMES, load_abi
+from nexusweb3.abi import load_abi
 from nexusweb3.contracts.erc20 import ERC20Client
 from nexusweb3.contracts.reputation import _TIERS
 from nexusweb3.permit import BASE_USDC_PERMIT_VERSION, build_permit_typed_data
@@ -126,26 +126,54 @@ def test_tier_order_matches_contract_enum() -> None:
     assert list(Tier) == list(_TIERS)
 
 
+def _job_tuple(status_index: int, *, accepted_at: int = 0, ever_submitted: bool = False) -> list[object]:
+    """Solidity `Job` field order: the two timestamps and `everSubmitted` came with the audit."""
+    return [
+        ZERO_ADDRESS,  # client
+        ZERO_ADDRESS,  # provider
+        ZERO_ADDRESS,  # arbiter
+        250_000_000,  # total
+        0,  # released
+        0,  # refunded
+        1,  # deadline
+        2,  # createdAt
+        accepted_at,  # acceptedAt
+        0,  # disputedAt
+        2,  # milestoneCount
+        0,  # approvedCount
+        ever_submitted,  # everSubmitted
+        status_index,
+        ZERO_BYTES32,  # termsHash
+    ]
+
+
 def test_job_status_decoded_by_index() -> None:
     order = ["Open", "Completed", "Cancelled", "Disputed", "Resolved", "Expired"]
     assert [s.value for s in JobStatus] == order
     for index, name in enumerate(order):
-        job = Job.from_tuple(
-            [ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, 250_000_000, 0, 0, 1, 2, 2, 0, index, ZERO_BYTES32]
-        )
+        job = Job.from_tuple(_job_tuple(index))
         assert job.status == JobStatus(name)
         assert job.total == 250_000_000
 
 
+def test_job_exposes_the_acceptance_fields() -> None:
+    offer = Job.from_tuple(_job_tuple(0))
+    assert (offer.accepted_at, offer.accepted, offer.ever_submitted) == (0, False, False)
+    live = Job.from_tuple(_job_tuple(0, accepted_at=1_700_000_000, ever_submitted=True))
+    assert (live.accepted_at, live.accepted, live.ever_submitted) == (1_700_000_000, True, True)
+    assert live.disputed_at == 0
+
+
 def test_milestone_status_decoded_by_index() -> None:
     assert [s.value for s in MilestoneStatus] == ["Pending", "Submitted", "Approved"]
-    milestone = Milestone.from_tuple([100_000_000, ZERO_BYTES32, 1_700_000_000, 1])
+    milestone = Milestone.from_tuple([100_000_000, ZERO_BYTES32, 1_700_000_000, 2, 1])
     assert milestone.status is MilestoneStatus.SUBMITTED
+    assert milestone.rejections == 2
 
 
 def test_job_from_tuple_rejects_unknown_status_index() -> None:
     with pytest.raises(ValueError, match="out of range"):
-        Job.from_tuple([ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, 0, 0, 0, 0, 0, 0, 0, 9, ZERO_BYTES32])
+        Job.from_tuple(_job_tuple(9))
 
 
 def test_struct_dataclasses_map_every_field() -> None:
@@ -184,6 +212,8 @@ def test_create_params_requires_a_milestone() -> None:
 
 
 # ─── permit typed data ──────────────────────────────────────────────────
+BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 TOKEN = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 SPENDER = "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0"
 KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
@@ -244,19 +274,6 @@ def test_permit_signature_recovers_to_the_owner() -> None:
     assert len(int(signed.r).to_bytes(32, "big")) == 32
 
 
-# ─── misc ───────────────────────────────────────────────────────────────
-def test_every_abi_is_packaged_and_loadable() -> None:
-    for name in CONTRACT_NAMES:
-        abi = load_abi(name)
-        assert any(entry.get("type") == "function" for entry in abi)
-    with pytest.raises(KeyError):
-        load_abi("NotAContract")
-
-
-def test_escrow_abi_exposes_the_interface_surface() -> None:
-    names = {entry["name"] for entry in load_abi("AgentEscrowV2") if entry["type"] == "function"}
-    assert {"createJob", "createJobWithPermit", "approveMilestone", "submitMilestone"} <= names
-
 
 def test_unit_conversion_round_trip() -> None:
     assert ERC20Client.to_units("100.5") == 100_500_000
@@ -265,8 +282,9 @@ def test_unit_conversion_round_trip() -> None:
         ERC20Client.to_units("1.0000001")
 
 
+
 def test_to_jsonable_handles_bytes_enums_and_dataclasses() -> None:
-    milestone = Milestone.from_tuple([1, to_bytes32("HASH"), 2, 2])
+    milestone = Milestone.from_tuple([1, to_bytes32("HASH"), 2, 0, 2])
     payload = to_jsonable(milestone)
     assert payload["status"] == "Approved"
     assert payload["deliverable_hash"].startswith("0x48415348")

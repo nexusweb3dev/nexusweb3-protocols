@@ -7,9 +7,10 @@
  * surfaces as a transfer failure rather than a permit failure — hence the allowance
  * assertions around it.
  */
-import { createWalletClient, http, parseUnits, type Address, type PrivateKeyAccount } from 'viem';
+import { createWalletClient, http, type Address, type PrivateKeyAccount } from 'viem';
 import { foundry } from 'viem/chains';
 import type { Addresses } from '../src/addresses.js';
+import { parseUsdc } from '../src/amount.js';
 import { createNexusClient } from '../src/client.js';
 import { signPermit } from '../src/permit.js';
 import type { Job, NexusPublicClient, NexusWalletClient } from '../src/types.js';
@@ -45,24 +46,26 @@ export async function runPermitLeg(params: PermitLegParams): Promise<PermitLegRe
   }) as NexusWalletClient;
   const client = createNexusClient({ publicClient, walletClient, addresses });
 
-  const total = parseUnits('75', 6);
+  const totalUsdc = '75.25';
+  const total = parseUsdc(totalUsdc);
   const allowanceBefore = await client.usdc.allowance(principal.address, addresses.escrow);
   const balanceBefore = await client.usdc.balanceOf(principal.address);
 
   const block = await publicClient.getBlock();
   const permitDeadline = block.timestamp + 3600n;
+  // No `version`: resolveEip712Version reads the token's ERC-5267 descriptor.
   const signed = await signPermit({
     walletClient,
     publicClient,
     token: addresses.paymentToken,
     owner: principal.address,
     spender: addresses.escrow,
-    value: total,
+    value: totalUsdc,
     deadline: permitDeadline,
   });
 
   const created = await client.escrow.createJobWithPermit(
-    { client: principal.address, provider, milestoneAmounts: [total], deadline },
+    { client: principal.address, provider, milestoneAmounts: [totalUsdc], deadline },
     permitDeadline,
     signed,
   );

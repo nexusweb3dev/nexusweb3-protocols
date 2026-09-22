@@ -162,3 +162,31 @@ contract FailingToken is ERC20Mock {
         return super.transfer(to, amount);
     }
 }
+
+/// @notice ERC-20 that burns `feeBps` of every holder-to-holder transfer, so the escrow delivers
+///         less than `total` on the funding pull and `createJob` must revert TokenAmountMismatch.
+contract FeeOnTransferToken is ERC20 {
+    uint256 public immutable feeBps;
+
+    constructor(uint256 feeBps_) ERC20("Fee On Transfer USD Coin", "ftUSDC") {
+        feeBps = feeBps_;
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (from == address(0) || to == address(0) || feeBps == 0) {
+            super._update(from, to, value);
+            return;
+        }
+        uint256 fee = (value * feeBps) / 10_000;
+        super._update(from, address(0), fee);
+        super._update(from, to, value - fee);
+    }
+}

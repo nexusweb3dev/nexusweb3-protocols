@@ -69,6 +69,19 @@ export const AgentAccessAbi = [
   },
   {
     "type": "function",
+    "name": "renounceOperator",
+    "inputs": [
+      {
+        "name": "agent",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "revokeOperator",
     "inputs": [
       {
@@ -101,6 +114,25 @@ export const AgentAccessAbi = [
         "type": "uint48",
         "indexed": false,
         "internalType": "uint48"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OperatorRenounced",
+    "inputs": [
+      {
+        "name": "agent",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "operator",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false

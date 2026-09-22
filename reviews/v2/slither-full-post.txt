@@ -1,0 +1,218 @@
+'forge clean' running (wd: /Users/evaldaslenzbergas/Desktop/Nexusweb3/nexusweb3-protocols)
+'forge config --json' running
+'forge build --build-info src/v2' running (wd: /Users/evaldaslenzbergas/Desktop/Nexusweb3/nexusweb3-protocols)
+INFO:Detectors:
+Detector: arbitrary-send-erc20
+AgentEscrowV2._create(IAgentEscrowV2.CreateParams) (src/v2/AgentEscrowV2.sol#235-281) uses arbitrary from in transferFrom: _token.safeTransferFrom(p.client,address(this),total) (src/v2/AgentEscrowV2.sol#275)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#arbitrary-from-in-transferfrom
+INFO:Detectors:
+Detector: uninitialized-state
+EscrowBase._milestones (src/v2/EscrowBase.sol#74) is never initialized. It is used in:
+	- EscrowBase.getMilestones(uint256) (src/v2/EscrowBase.sol#93-96)
+	- EscrowBase._milestone(uint256,IAgentEscrowV2.Job,uint8) (src/v2/EscrowBase.sol#308-311)
+	- EscrowBase._expiry(uint256,IAgentEscrowV2.Job) (src/v2/EscrowBase.sol#319-327)
+	- AgentEscrowV2.settleExpired(uint256) (src/v2/AgentEscrowV2.sol#191-220)
+	- AgentEscrowV2._create(IAgentEscrowV2.CreateParams) (src/v2/AgentEscrowV2.sol#235-281)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#uninitialized-state-variables
+INFO:Detectors:
+Detector: reentrancy-no-eth
+Reentrancy in EscrowBase._payProvider(IAgentEscrowV2.Job,uint256) (src/v2/EscrowBase.sol#270-275):
+	External calls:
+	- _routeFee(job.provider,fee) (src/v2/EscrowBase.sol#273)
+		- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+	- _payOut(job.provider,net) (src/v2/EscrowBase.sol#274)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	State variables written after the call(s):
+	- _payOut(job.provider,net) (src/v2/EscrowBase.sol#274)
+		- _claimable[to] += amount (src/v2/EscrowBase.sol#283)
+	EscrowBase._claimable (src/v2/EscrowBase.sol#76) can be used in cross function reentrancies:
+	- EscrowBase.claimable(address) (src/v2/EscrowBase.sol#128-130)
+Reentrancy in AgentEscrowV2.resolve(uint256,uint16) (src/v2/AgentEscrowV2.sol#162-186):
+	External calls:
+	- (None,fee) = _payProvider(job,toProvider) (src/v2/AgentEscrowV2.sol#175)
+		- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	- _payOut(job.client,toClient) (src/v2/AgentEscrowV2.sol#176)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	State variables written after the call(s):
+	- _payOut(job.client,toClient) (src/v2/AgentEscrowV2.sol#176)
+		- _claimable[to] += amount (src/v2/EscrowBase.sol#283)
+	EscrowBase._claimable (src/v2/EscrowBase.sol#76) can be used in cross function reentrancies:
+	- EscrowBase.claimable(address) (src/v2/EscrowBase.sol#128-130)
+Reentrancy in AgentEscrowV2.settleExpired(uint256) (src/v2/AgentEscrowV2.sol#191-220):
+	External calls:
+	- _payProvider(job,toProvider) (src/v2/AgentEscrowV2.sol#215)
+		- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	- _payOut(job.client,toClient) (src/v2/AgentEscrowV2.sol#216)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	State variables written after the call(s):
+	- _payOut(job.client,toClient) (src/v2/AgentEscrowV2.sol#216)
+		- _claimable[to] += amount (src/v2/EscrowBase.sol#283)
+	EscrowBase._claimable (src/v2/EscrowBase.sol#76) can be used in cross function reentrancies:
+	- EscrowBase.claimable(address) (src/v2/EscrowBase.sol#128-130)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#reentrancy-vulnerabilities-2
+INFO:Detectors:
+Detector: uninitialized-local
+AgentEscrowV2.settleExpired(uint256).toProvider (src/v2/AgentEscrowV2.sol#202) is a local variable never initialized
+FeeRouter.route(address,uint256).referralPaid (src/v2/FeeRouter.sol#84) is a local variable never initialized
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#uninitialized-local-variables
+INFO:Detectors:
+Detector: unused-return
+EscrowBase._log(address,bytes32,uint256,uint8,uint256) (src/v2/EscrowBase.sol#230-235) ignores return value by _auditLog.log{gas: HOOK_GAS_LOG}(agent,actionType,dataHash,value) (src/v2/EscrowBase.sol#234)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#unused-return
+INFO:Detectors:
+Detector: shadowing-local
+IFeeRouter.setRecipients(address,address).treasury (src/v2/interfaces/IFeeRouter.sol#49) shadows:
+	- IFeeRouter.treasury() (src/v2/interfaces/IFeeRouter.sol#42) (function)
+IFeeRouter.setRecipients(address,address).stakingRecipient (src/v2/interfaces/IFeeRouter.sol#49) shadows:
+	- IFeeRouter.stakingRecipient() (src/v2/interfaces/IFeeRouter.sol#43) (function)
+IFeeRouter.setReferral(address).referral (src/v2/interfaces/IFeeRouter.sol#50) shadows:
+	- IFeeRouter.referral() (src/v2/interfaces/IFeeRouter.sol#44) (function)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#local-variable-shadowing
+INFO:Detectors:
+Detector: missing-zero-check
+AgentIdentityV2.constructor(IAgentAccess,address,address).erc8004Registry_ (src/v2/AgentIdentityV2.sol#42) lacks a zero-check on :
+		- erc8004Registry = erc8004Registry_ (src/v2/AgentIdentityV2.sol#43)
+AgentIdentityV2.setERC8004Registry(address).registry (src/v2/AgentIdentityV2.sol#192) lacks a zero-check on :
+		- erc8004Registry = registry (src/v2/AgentIdentityV2.sol#194)
+FeeRouter.constructor(IERC20,address,address,address,address,uint16,uint16).referral_ (src/v2/FeeRouter.sol#49) lacks a zero-check on :
+		- _referral = referral_ (src/v2/FeeRouter.sol#62)
+FeeRouter.setReferral(address).referral_ (src/v2/FeeRouter.sol#130) lacks a zero-check on :
+		- _referral = referral_ (src/v2/FeeRouter.sol#134)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#missing-zero-address-validation
+INFO:Detectors:
+Detector: reentrancy-benign
+Reentrancy in AgentEscrowV2._approve(uint256,IAgentEscrowV2.Job,uint8,IAgentEscrowV2.Milestone) (src/v2/AgentEscrowV2.sol#300-316):
+	External calls:
+	- (net,fee) = _payProvider(job,m.amount) (src/v2/AgentEscrowV2.sol#305)
+		- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	State variables written after the call(s):
+	- _mayScore(job,m.amount) (src/v2/AgentEscrowV2.sol#306)
+		- _pairReputation[job.client][job.provider] = n + 1 (src/v2/EscrowBase.sol#226)
+Reentrancy in AgentEscrowV2._create(IAgentEscrowV2.CreateParams) (src/v2/AgentEscrowV2.sol#235-281):
+	External calls:
+	- _consumeSpend(p.client,total) (src/v2/AgentEscrowV2.sol#246)
+		- _killSwitch.consume(agent,amount) (src/v2/EscrowBase.sol#204)
+	State variables written after the call(s):
+	- jobId = _jobCount ++ (src/v2/AgentEscrowV2.sol#248)
+	- job.client = p.client (src/v2/AgentEscrowV2.sol#250)
+	- job.provider = p.provider (src/v2/AgentEscrowV2.sol#251)
+	- job.arbiter = p.arbiter (src/v2/AgentEscrowV2.sol#252)
+	- job.total = total (src/v2/AgentEscrowV2.sol#253)
+	- job.deadline = p.deadline (src/v2/AgentEscrowV2.sol#254)
+	- job.createdAt = uint48(block.timestamp) (src/v2/AgentEscrowV2.sol#255)
+	- job.milestoneCount = uint8(n) (src/v2/AgentEscrowV2.sol#256)
+	- job.termsHash = p.termsHash (src/v2/AgentEscrowV2.sol#257)
+	- _jobsOf[p.client].push(jobId) (src/v2/AgentEscrowV2.sol#271)
+	- _jobsOf[p.provider].push(jobId) (src/v2/AgentEscrowV2.sol#272)
+Reentrancy in EscrowBase._payOut(address,uint256) (src/v2/EscrowBase.sol#278-285):
+	External calls:
+	- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	State variables written after the call(s):
+	- _claimable[to] += amount (src/v2/EscrowBase.sol#283)
+Reentrancy in EscrowBase._routeFee(address,uint256) (src/v2/EscrowBase.sol#252-260):
+	External calls:
+	- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+	State variables written after the call(s):
+	- _claimable[owner()] += fee (src/v2/EscrowBase.sol#257)
+Reentrancy in AgentEscrowV2.resolve(uint256,uint16) (src/v2/AgentEscrowV2.sol#162-186):
+	External calls:
+	- (None,fee) = _payProvider(job,toProvider) (src/v2/AgentEscrowV2.sol#175)
+		- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	- _payOut(job.client,toClient) (src/v2/AgentEscrowV2.sol#176)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	State variables written after the call(s):
+	- providerBps != BPS / 2 && _mayScore(job,remaining) (src/v2/AgentEscrowV2.sol#179)
+		- _pairReputation[job.client][job.provider] = n + 1 (src/v2/EscrowBase.sol#226)
+Reentrancy in AgentEscrowV2.settleExpired(uint256) (src/v2/AgentEscrowV2.sol#191-220):
+	External calls:
+	- _payProvider(job,toProvider) (src/v2/AgentEscrowV2.sol#215)
+		- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	- _payOut(job.client,toClient) (src/v2/AgentEscrowV2.sol#216)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	State variables written after the call(s):
+	- toProvider > 0 && _mayScore(job,toProvider) (src/v2/AgentEscrowV2.sol#217)
+		- _pairReputation[job.client][job.provider] = n + 1 (src/v2/EscrowBase.sol#226)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#reentrancy-vulnerabilities-3
+INFO:Detectors:
+Detector: reentrancy-events
+Reentrancy in EscrowBase._payOut(address,uint256) (src/v2/EscrowBase.sol#278-285):
+	External calls:
+	- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	Event emitted after the call(s):
+	- ClaimableAdded(to,amount) (src/v2/EscrowBase.sol#284)
+Reentrancy in EscrowBase._payProvider(IAgentEscrowV2.Job,uint256) (src/v2/EscrowBase.sol#270-275):
+	External calls:
+	- _routeFee(job.provider,fee) (src/v2/EscrowBase.sol#273)
+		- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+	- _payOut(job.provider,net) (src/v2/EscrowBase.sol#274)
+		- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+	Event emitted after the call(s):
+	- ClaimableAdded(to,amount) (src/v2/EscrowBase.sol#284)
+		- _payOut(job.provider,net) (src/v2/EscrowBase.sol#274)
+Reentrancy in EscrowBase._routeFee(address,uint256) (src/v2/EscrowBase.sol#252-260):
+	External calls:
+	- this.routeFeeSelf{gas: HOOK_GAS_FEE}(agent,fee) (src/v2/EscrowBase.sol#255-259)
+	Event emitted after the call(s):
+	- ClaimableAdded(owner(),fee) (src/v2/EscrowBase.sol#258)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#reentrancy-vulnerabilities-4
+INFO:Detectors:
+Detector: timestamp
+AgentAccess.authorizeOperator(address,uint48) (src/v2/AgentAccess.sol#12-18) uses timestamp for comparisons
+	Dangerous comparisons:
+	- expiry <= block.timestamp (src/v2/AgentAccess.sol#15)
+AgentAccess.isOperatorFor(address,address) (src/v2/AgentAccess.sol#34-37) uses timestamp for comparisons
+	Dangerous comparisons:
+	- _expiry[agent][caller] > block.timestamp (src/v2/AgentAccess.sol#36)
+AgentAuditLogV2.getLog(uint256) (src/v2/AgentAuditLogV2.sol#86-89) uses timestamp for comparisons
+	Dangerous comparisons:
+	- logId >= _logs.length (src/v2/AgentAuditLogV2.sol#87)
+AgentEscrowV2.rejectMilestone(uint256,uint8,bytes32) (src/v2/AgentEscrowV2.sol#60-75) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp > m.submittedAt + REVIEW_WINDOW (src/v2/AgentEscrowV2.sol#68)
+AgentEscrowV2.acceptJob(uint256) (src/v2/AgentEscrowV2.sol#95-106) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp > job.deadline (src/v2/AgentEscrowV2.sol#100)
+AgentEscrowV2.submitMilestone(uint256,uint8,bytes32) (src/v2/AgentEscrowV2.sol#109-125) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp > job.deadline (src/v2/AgentEscrowV2.sol#114)
+AgentEscrowV2.claimApproval(uint256,uint8) (src/v2/AgentEscrowV2.sol#128-139) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp <= claimableAt (src/v2/AgentEscrowV2.sol#136)
+AgentEscrowV2.dispute(uint256,bytes32) (src/v2/AgentEscrowV2.sol#144-157) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp > _expiry(jobId,job) (src/v2/AgentEscrowV2.sol#149)
+AgentEscrowV2.settleExpired(uint256) (src/v2/AgentEscrowV2.sol#191-220) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp <= _expiry(jobId,job) (src/v2/AgentEscrowV2.sol#194)
+	- block.timestamp <= uint256(job.disputedAt) + DISPUTE_GRACE (src/v2/AgentEscrowV2.sol#196)
+AgentEscrowV2._create(IAgentEscrowV2.CreateParams) (src/v2/AgentEscrowV2.sol#235-281) uses timestamp for comparisons
+	Dangerous comparisons:
+	- p.deadline < block.timestamp + MIN_DURATION || p.deadline > block.timestamp + MAX_DURATION (src/v2/AgentEscrowV2.sol#240)
+AgentIdentityV2.exists(address) (src/v2/AgentIdentityV2.sol#248-250) uses timestamp for comparisons
+	Dangerous comparisons:
+	- _agents[agent].registeredAt != 0 (src/v2/AgentIdentityV2.sol#249)
+AgentKillSwitchV2.consume(address,uint256) (src/v2/AgentKillSwitchV2.sol#144-175) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp >= uint256(c.sessionStart) + uint256(c.sessionDuration) (src/v2/AgentKillSwitchV2.sol#150)
+AgentKillSwitchV2.remainingSpend(address) (src/v2/AgentKillSwitchV2.sol#218-225) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp >= uint256(c.sessionStart) + uint256(c.sessionDuration) (src/v2/AgentKillSwitchV2.sol#221)
+AgentReputationV2.recordInteraction(address,bool,uint8,uint256) (src/v2/AgentReputationV2.sol#37-58) uses timestamp for comparisons
+	Dangerous comparisons:
+	- valueUsdc >= headroom (src/v2/AgentReputationV2.sol#52)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#block-timestamp
+INFO:Detectors:
+Detector: low-level-calls
+Low level call in EscrowBase._payOut(address,uint256) (src/v2/EscrowBase.sol#278-285):
+	- (ok,data) = address(_token).call(abi.encodeCall(IERC20.transfer,(to,amount))) (src/v2/EscrowBase.sol#280)
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#low-level-calls
+INFO:Detectors:
+Detector: unindexed-event-address
+Event IAgentEscrowV2.ModulesUpdated(address,address,address,address) (src/v2/interfaces/IAgentEscrowV2.sol#101) has address parameters but no indexed parameters
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#unindexed-event-address-parameters
+INFO:Slither:src/v2 analyzed (33 contracts with 101 detectors), 40 result(s) found

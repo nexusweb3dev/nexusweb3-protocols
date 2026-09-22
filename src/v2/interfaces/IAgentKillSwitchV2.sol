@@ -2,9 +2,10 @@
 pragma solidity ^0.8.24;
 
 /// @title IAgentKillSwitchV2
-/// @notice Opt-in spending guard enforced by authorized protocols via `consume`. Config changes are
-///         principal-only (never operators); kill/pause can also be done by a guardian. Sessions
-///         auto-roll when expired. Unregistered agents are treated as active with no limits.
+/// @notice Opt-in spending guard enforced by authorized protocols via `consume`. Config changes and
+///         session resets are principal-only (never operators, never guardians); kill/pause/unpause
+///         can also be done by a guardian, which may only restrict spending. Sessions auto-roll when
+///         expired. Unregistered agents are treated as active with no limits.
 interface IAgentKillSwitchV2 {
     struct AgentConfig {
         uint128 spendingLimit; // per session, 6-decimal USDC units
@@ -51,12 +52,14 @@ interface IAgentKillSwitchV2 {
     function setLimits(uint128 spendingLimit, uint32 txLimit, uint48 sessionDuration) external;
     function setGuardian(address guardian) external;
     function resume() external; // un-kill, principal only
+    /// @notice Zero the session counters and start a fresh session. Principal-only: a reset restores
+    ///         spending headroom, so the restrict-only guardian role must not be able to call it.
+    function resetSession(address agent) external;
 
-    // ─── Principal or guardian ──────────────────────────────────────────
+    // ─── Principal or guardian (restrict only) ──────────────────────────
     function kill(address agent) external;
     function pause(address agent) external;
     function unpause(address agent) external;
-    function resetSession(address agent) external;
 
     // ─── Authorized protocols ───────────────────────────────────────────
     /// @notice Enforce limits for `agent` spending `amount`. Reverts if killed, paused, or over limit.
@@ -66,7 +69,8 @@ interface IAgentKillSwitchV2 {
     // ─── Views ──────────────────────────────────────────────────────────
     function isActive(address agent) external view returns (bool); // !killed && !paused
     function getConfig(address agent) external view returns (AgentConfig memory);
-    function remainingSpend(address agent) external view returns (uint256); // max if unregistered
+    /// @notice Spend left this session; max if unregistered, 0 if the limit was lowered below spent.
+    function remainingSpend(address agent) external view returns (uint256);
     function guardianOf(address agent) external view returns (address);
     function isAuthorizedProtocol(address protocol) external view returns (bool);
 
