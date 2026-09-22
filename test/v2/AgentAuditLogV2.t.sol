@@ -358,6 +358,36 @@ contract AgentAuditLogV2Test is Test {
         assertEq(page[1].value, 4);
     }
 
+    /// @notice M-05: an unbounded `limit` must not build an unbounded array. 500 requested over 300
+    ///         stored entries returns exactly MAX_PAGE_SIZE.
+    function test_M05_getAgentLogsClipsLimitToMaxPageSize() public {
+        _logN(agent1, 300);
+
+        IAgentAuditLogV2.ActionLog[] memory page = auditLog.getAgentLogs(agent1, 0, 500);
+
+        assertEq(auditLog.MAX_PAGE_SIZE(), 200);
+        assertEq(page.length, 200);
+        assertEq(page[0].value, 0);
+        assertEq(page[199].value, 199);
+    }
+
+    /// @notice M-05: the cap applies from any offset, and the rest is reachable by paging.
+    function test_M05_pagingPastTheCapReachesEveryEntry() public {
+        _logN(agent1, 300);
+
+        IAgentAuditLogV2.ActionLog[] memory second = auditLog.getAgentLogs(agent1, 200, type(uint256).max);
+        assertEq(second.length, 100);
+        assertEq(second[0].value, 200);
+        assertEq(second[99].value, 299);
+    }
+
+    /// @notice M-05: requests at or below the cap are untouched.
+    function test_M05_limitAtCapIsNotClipped() public {
+        _logN(agent1, 250);
+        assertEq(auditLog.getAgentLogs(agent1, 0, 200).length, 200);
+        assertEq(auditLog.getAgentLogs(agent1, 0, 199).length, 199);
+    }
+
     function test_getAgentLogsOffsetEqualsCount() public {
         _logN(agent1, 3);
         assertEq(auditLog.getAgentLogs(agent1, 3, 10).length, 0);
@@ -558,5 +588,64 @@ contract AgentAuditLogV2Test is Test {
         assertEq(l.actionType, actionType);
         assertEq(l.dataHash, dataHash);
         assertEq(l.value, value);
+    }
+
+    // ─── H-02: two-step ownership ───────────────────────────────────────
+
+    /// @notice H-02: `transferOwnership` only proposes. A mistyped owner cannot brick the contract
+    ///         because the current owner keeps every power until the new one accepts.
+    function test_H02_transferOwnershipOnlyProposes() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        auditLog.transferOwnership(newOwner);
+
+        assertEq(auditLog.owner(), owner);
+        assertEq(auditLog.pendingOwner(), newOwner);
+    }
+
+    /// @notice H-02: ownership moves only once the proposed owner accepts.
+    function test_H02_acceptOwnershipCompletesTransfer() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        auditLog.transferOwnership(newOwner);
+
+        vm.prank(newOwner);
+        auditLog.acceptOwnership();
+
+        assertEq(auditLog.owner(), newOwner);
+        assertEq(auditLog.pendingOwner(), address(0));
+    }
+
+    /// @notice H-02: nobody but the proposed owner can accept.
+    function test_H02_revert_acceptOwnershipByStranger() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        auditLog.transferOwnership(newOwner);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        auditLog.acceptOwnership();
+
+        assertEq(auditLog.owner(), owner);
+    }
+
+    /// @notice H-02: a typo'd proposal is recoverable — the real owner just re-proposes.
+    function test_H02_pendingOwnerCanBeReplacedBeforeAcceptance() public {
+        address typo = makeAddr("typo");
+        address newOwner = makeAddr("newOwner");
+
+        vm.startPrank(owner);
+        auditLog.transferOwnership(typo);
+        auditLog.transferOwnership(newOwner);
+        vm.stopPrank();
+
+        assertEq(auditLog.pendingOwner(), newOwner);
+
+        vm.prank(typo);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, typo));
+        auditLog.acceptOwnership();
     }
 }

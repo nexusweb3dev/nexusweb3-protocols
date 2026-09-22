@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IAgentAccess} from "./interfaces/IAgentAccess.sol";
 import {IAgentAuditLogV2} from "./interfaces/IAgentAuditLogV2.sol";
@@ -11,9 +12,11 @@ import {OperatorGated} from "./OperatorGated.sol";
 /// @notice Free, append-only action log for AI agents. An entry may be written by the agent
 ///         principal, one of its operators (via AgentAccess), or an owner-authorized protocol.
 ///         No fees and no ETH handling anywhere in this contract; every read is a free `view`.
-contract AgentAuditLogV2 is OperatorGated, Ownable, Pausable, IAgentAuditLogV2 {
+contract AgentAuditLogV2 is OperatorGated, Ownable2Step, Pausable, IAgentAuditLogV2 {
     /// @notice Maximum number of entries accepted by a single `logBatch` call.
     uint256 public constant MAX_BATCH_SIZE = 50;
+    /// @notice Maximum number of entries a single `getAgentLogs` page may return.
+    uint256 public constant MAX_PAGE_SIZE = 200;
 
     /// @notice Thrown when a log id is read that has never been written.
     error LogNotFound(uint256 logId);
@@ -92,12 +95,14 @@ contract AgentAuditLogV2 is OperatorGated, Ownable, Pausable, IAgentAuditLogV2 {
 
     /// @notice Paginated read of `agent`'s entries in append order.
     /// @param offset Index into the agent's own list; an out-of-range offset returns an empty array.
-    /// @param limit Maximum entries to return; clipped to the number remaining after `offset`.
+    /// @param limit Maximum entries to return; clipped to `MAX_PAGE_SIZE` and to the number
+    ///        remaining after `offset`, so an unbounded request can never exhaust the caller's gas.
     function getAgentLogs(address agent, uint256 offset, uint256 limit) external view returns (ActionLog[] memory) {
         uint256[] storage ids = _agentLogIds[agent];
         uint256 total = ids.length;
         if (offset >= total || limit == 0) return new ActionLog[](0);
 
+        if (limit > MAX_PAGE_SIZE) limit = MAX_PAGE_SIZE;
         uint256 remaining = total - offset;
         uint256 size = limit < remaining ? limit : remaining;
         ActionLog[] memory result = new ActionLog[](size);

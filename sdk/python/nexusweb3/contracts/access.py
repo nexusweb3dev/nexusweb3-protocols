@@ -24,13 +24,25 @@ class AccessClient(ContractClient):
     def revoke_operator(self, operator: str) -> TxResult:
         return self._send("revokeOperator", Web3.to_checksum_address(operator))
 
+    def renounce_operator(self, agent: str) -> TxResult:
+        """Signed by the operator itself: give up its own authorization for `agent`.
+
+        Lets a hot key that may have leaked cut itself off without waiting for the principal.
+        """
+        return self._send("renounceOperator", Web3.to_checksum_address(agent))
+
     def is_operator_for(self, agent: str, caller: str) -> bool:
         return bool(
             self._call("isOperatorFor", Web3.to_checksum_address(agent), Web3.to_checksum_address(caller))
         )
 
     def operator_expiry(self, agent: str, operator: str) -> int:
-        """Expiry of the authorization, 0 when not authorized."""
+        """Unix second the authorization lapses, or 0 when there is no live one.
+
+        0 covers every way an authorization can be absent: never granted, revoked, renounced, or
+        simply expired. A non-zero result is therefore always in the future, so this and
+        :meth:`is_operator_for` never disagree.
+        """
         return int(
             self._call("operatorExpiry", Web3.to_checksum_address(agent), Web3.to_checksum_address(operator))
         )

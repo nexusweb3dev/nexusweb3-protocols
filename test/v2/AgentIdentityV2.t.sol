@@ -62,6 +62,7 @@ contract AgentIdentityV2Test is Test {
         assertEq(address(identity.access()), address(access));
         assertEq(identity.owner(), owner);
         assertEq(identity.erc8004Registry(), address(erc8004));
+        assertEq(identity.registryEpoch(), 1);
         assertEq(identity.agentCount(), 0);
         assertFalse(identity.paused());
     }
@@ -495,6 +496,140 @@ contract AgentIdentityV2Test is Test {
         identity.linkERC8004(alice, 4);
     }
 
+    /// @notice H-01: token id 0 is never a valid ERC-8004 id, and an ERC-721 that happens to mint it
+    ///         must not be able to create a link that every view reports as "unlinked".
+    function test_H01_revert_linkERC8004ZeroId() public {
+        _registerAlice();
+        erc8004.mint(alice, 0);
+
+        vm.prank(alice);
+        vm.expectRevert(IAgentIdentityV2.InvalidERC8004Id.selector);
+        identity.linkERC8004(alice, 0);
+
+        assertEq(identity.erc8004IdOf(alice), 0);
+        assertEq(identity.agentOfERC8004(0), address(0));
+    }
+
+    /// @notice H-01: the zero-id guard is a pure addition; real links keep working.
+    function test_H01_zeroIdGuardLeavesExistingLinksIntact() public {
+        _registerAlice();
+        erc8004.mint(alice, 42);
+        erc8004.mint(alice, 0);
+
+        vm.prank(alice);
+        identity.linkERC8004(alice, 42);
+
+        vm.prank(alice);
+        vm.expectRevert(IAgentIdentityV2.InvalidERC8004Id.selector);
+        identity.linkERC8004(alice, 0);
+
+        assertEq(identity.erc8004IdOf(alice), 42);
+        assertEq(identity.agentOfERC8004(42), alice);
+    }
+
+    /// @notice M-04: a link validated against the old registry must stop reading as valid once the
+    ///         owner points the contract at a different registry.
+    function test_M04_registrySwapInvalidatesExistingLinks() public {
+        _registerAlice();
+        erc8004.mint(alice, 42);
+        vm.prank(alice);
+        identity.linkERC8004(alice, 42);
+        assertEq(identity.erc8004IdOf(alice), 42);
+
+        MockERC721 next = new MockERC721("Next", "NXT");
+        vm.prank(owner);
+        identity.setERC8004Registry(address(next));
+
+        assertEq(identity.registryEpoch(), 2);
+        assertEq(identity.erc8004IdOf(alice), 0);
+        assertEq(identity.agentOfERC8004(42), address(0));
+    }
+
+    /// @notice M-04: after a swap the agent re-links under the new registry and reads valid again.
+    function test_M04_relinkUnderNewRegistryWorks() public {
+        _registerAlice();
+        erc8004.mint(alice, 42);
+        vm.prank(alice);
+        identity.linkERC8004(alice, 42);
+
+        MockERC721 next = new MockERC721("Next", "NXT");
+        vm.prank(owner);
+        identity.setERC8004Registry(address(next));
+
+        next.mint(alice, 7);
+        vm.prank(alice);
+        identity.linkERC8004(alice, 7);
+
+        assertEq(identity.erc8004IdOf(alice), 7);
+        assertEq(identity.agentOfERC8004(7), alice);
+        // The id from the retired registry stays unreadable.
+        assertEq(identity.agentOfERC8004(42), address(0));
+    }
+
+    /// @notice M-04: re-linking the same id under the new registry clears the stale-epoch link first.
+    function test_M04_relinkSameIdUnderNewRegistryClearsStaleEpoch() public {
+        _registerAlice();
+        erc8004.mint(alice, 42);
+        vm.prank(alice);
+        identity.linkERC8004(alice, 42);
+
+        MockERC721 next = new MockERC721("Next", "NXT");
+        vm.prank(owner);
+        identity.setERC8004Registry(address(next));
+        next.mint(alice, 42);
+
+        vm.expectEmit(true, true, false, false, address(identity));
+        emit IAgentIdentityV2.ERC8004Unlinked(alice, 42);
+        vm.expectEmit(true, true, false, false, address(identity));
+        emit IAgentIdentityV2.ERC8004Linked(alice, 42);
+        vm.prank(alice);
+        identity.linkERC8004(alice, 42);
+
+        assertEq(identity.erc8004IdOf(alice), 42);
+        assertEq(identity.agentOfERC8004(42), alice);
+    }
+
+    /// @notice M-04: a stale-epoch link belonging to another agent does not block the new owner.
+    function test_M04_staleEpochLinkOfOtherAgentIsCleared() public {
+        _registerAlice();
+        _register(bob, "bob-agent");
+        erc8004.mint(bob, 4);
+        vm.prank(bob);
+        identity.linkERC8004(bob, 4);
+
+        MockERC721 next = new MockERC721("Next", "NXT");
+        vm.prank(owner);
+        identity.setERC8004Registry(address(next));
+        next.mint(alice, 4);
+
+        vm.prank(alice);
+        identity.linkERC8004(alice, 4);
+
+        assertEq(identity.agentOfERC8004(4), alice);
+        assertEq(identity.erc8004IdOf(bob), 0);
+    }
+
+    /// @notice M-04: users can always clean up, including links made under a retired registry.
+    function test_M04_unlinkStillWorksForOldEpochLink() public {
+        _registerAlice();
+        erc8004.mint(alice, 42);
+        vm.prank(alice);
+        identity.linkERC8004(alice, 42);
+
+        MockERC721 next = new MockERC721("Next", "NXT");
+        vm.prank(owner);
+        identity.setERC8004Registry(address(next));
+
+        vm.expectEmit(true, true, false, false, address(identity));
+        emit IAgentIdentityV2.ERC8004Unlinked(alice, 42);
+        vm.prank(alice);
+        identity.unlinkERC8004(alice);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(IAgentIdentityV2.NotLinked.selector, alice));
+        identity.unlinkERC8004(alice);
+    }
+
     function test_revert_unlinkERC8004NotLinked() public {
         _registerAlice();
         vm.prank(alice);
@@ -513,6 +648,7 @@ contract AgentIdentityV2Test is Test {
         identity.setERC8004Registry(address(next));
 
         assertEq(identity.erc8004Registry(), address(next));
+        assertEq(identity.registryEpoch(), 2);
     }
 
     function test_setERC8004RegistryToZeroDisablesLinking() public {
@@ -713,5 +849,138 @@ contract AgentIdentityV2Test is Test {
             identity.deactivate(agent);
         }
         assertEq(identity.agentCount(), 0);
+    }
+
+    // ─── L-01: name charset ─────────────────────────────────────────────
+
+    /// @notice L-01: a Cyrillic homoglyph of "atlas" (U+0430 for the leading "a") must not be
+    ///         registrable alongside the genuine handle.
+    function test_L01_revert_registerHomoglyphName() public {
+        _register(alice, "atlas");
+
+        vm.prank(bob);
+        vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+        identity.register(bob, unicode"аtlas", URI, AGENT_TYPE);
+
+        assertEq(identity.getAgentByName("atlas"), alice);
+        assertFalse(identity.exists(bob));
+    }
+
+    /// @notice L-01: uppercase is rejected, so "Atlas" cannot shadow "atlas".
+    function test_L01_revert_registerUppercaseName() public {
+        _register(alice, "atlas");
+
+        vm.prank(bob);
+        vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+        identity.register(bob, "Atlas", URI, AGENT_TYPE);
+    }
+
+    /// @notice L-01: whitespace is rejected in any position.
+    function test_L01_revert_registerNameWithLeadingSpace() public {
+        vm.prank(alice);
+        vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+        identity.register(alice, " atlas", URI, AGENT_TYPE);
+
+        vm.prank(alice);
+        vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+        identity.register(alice, "atlas ", URI, AGENT_TYPE);
+
+        vm.prank(alice);
+        vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+        identity.register(alice, "at las", URI, AGENT_TYPE);
+    }
+
+    /// @notice L-01: control bytes, NUL included, are rejected.
+    function test_L01_revert_registerNameWithNulByte() public {
+        vm.prank(alice);
+        vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+        identity.register(alice, "atlas\x00", URI, AGENT_TYPE);
+
+        vm.prank(alice);
+        vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+        identity.register(alice, "atlas\n", URI, AGENT_TYPE);
+    }
+
+    /// @notice L-01: every byte of the allowed set still registers.
+    function test_L01_allowedCharsetRegisters() public {
+        vm.prank(alice);
+        identity.register(alice, "abcdefghijklmnopqrstuvwxyz0123456789-_.", URI, AGENT_TYPE);
+
+        assertEq(identity.getAgentByName("abcdefghijklmnopqrstuvwxyz0123456789-_."), alice);
+    }
+
+    /// @notice L-01: nothing outside the allowed set gets through, at any position.
+    function testFuzz_L01_rejectsEveryByteOutsideCharset(uint8 raw) public {
+        bytes1 c = bytes1(raw);
+        bool allowed = (c >= 0x61 && c <= 0x7A) || (c >= 0x30 && c <= 0x39) || c == 0x2D || c == 0x5F || c == 0x2E;
+
+        string memory name = string(abi.encodePacked("a", c, "z"));
+        vm.prank(alice);
+        if (!allowed) {
+            vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+            identity.register(alice, name, URI, AGENT_TYPE);
+            return;
+        }
+        identity.register(alice, name, URI, AGENT_TYPE);
+        assertEq(identity.getAgentByName(name), alice);
+    }
+
+    // ─── H-02: two-step ownership ───────────────────────────────────────
+
+    /// @notice H-02: `transferOwnership` only proposes. A mistyped owner cannot brick the contract
+    ///         because the current owner keeps every power until the new one accepts.
+    function test_H02_transferOwnershipOnlyProposes() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        identity.transferOwnership(newOwner);
+
+        assertEq(identity.owner(), owner);
+        assertEq(identity.pendingOwner(), newOwner);
+    }
+
+    /// @notice H-02: ownership moves only once the proposed owner accepts.
+    function test_H02_acceptOwnershipCompletesTransfer() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        identity.transferOwnership(newOwner);
+
+        vm.prank(newOwner);
+        identity.acceptOwnership();
+
+        assertEq(identity.owner(), newOwner);
+        assertEq(identity.pendingOwner(), address(0));
+    }
+
+    /// @notice H-02: nobody but the proposed owner can accept.
+    function test_H02_revert_acceptOwnershipByStranger() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        identity.transferOwnership(newOwner);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        identity.acceptOwnership();
+
+        assertEq(identity.owner(), owner);
+    }
+
+    /// @notice H-02: a typo'd proposal is recoverable — the real owner just re-proposes.
+    function test_H02_pendingOwnerCanBeReplacedBeforeAcceptance() public {
+        address typo = makeAddr("typo");
+        address newOwner = makeAddr("newOwner");
+
+        vm.startPrank(owner);
+        identity.transferOwnership(typo);
+        identity.transferOwnership(newOwner);
+        vm.stopPrank();
+
+        assertEq(identity.pendingOwner(), newOwner);
+
+        vm.prank(typo);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, typo));
+        identity.acceptOwnership();
     }
 }

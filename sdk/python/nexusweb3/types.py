@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
+
+from .amount import UsdcAmount, to_base_units
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 ZERO_BYTES32 = b"\x00" * 32
@@ -25,6 +27,7 @@ __all__ = [
     "Milestone",
     "ActionLog",
     "CreateParams",
+    "Payout",
     "to_bytes32",
     "from_bytes32",
     "coerce_bytes32",
@@ -193,10 +196,18 @@ class Job:
     refunded: int
     deadline: int
     created_at: int
+    accepted_at: int
+    disputed_at: int
     milestone_count: int
     approved_count: int
+    ever_submitted: bool
     status: JobStatus
     terms_hash: bytes
+
+    @property
+    def accepted(self) -> bool:
+        """True once the provider bound itself to the offer with `acceptJob`."""
+        return self.accepted_at != 0
 
     @classmethod
     def from_tuple(cls, values: Sequence[Any]) -> "Job":
@@ -209,10 +220,13 @@ class Job:
             refunded=int(values[5]),
             deadline=int(values[6]),
             created_at=int(values[7]),
-            milestone_count=int(values[8]),
-            approved_count=int(values[9]),
-            status=_by_index(JobStatus, int(values[10])),
-            terms_hash=bytes(values[11]),
+            accepted_at=int(values[8]),
+            disputed_at=int(values[9]),
+            milestone_count=int(values[10]),
+            approved_count=int(values[11]),
+            ever_submitted=bool(values[12]),
+            status=_by_index(JobStatus, int(values[13])),
+            terms_hash=bytes(values[14]),
         )
 
 
@@ -223,6 +237,7 @@ class Milestone:
     amount: int
     deliverable_hash: bytes
     submitted_at: int
+    rejections: int
     status: MilestoneStatus
 
     @classmethod
@@ -231,7 +246,33 @@ class Milestone:
             amount=int(values[0]),
             deliverable_hash=bytes(values[1]),
             submitted_at=int(values[2]),
-            status=_by_index(MilestoneStatus, int(values[3])),
+            rejections=int(values[3]),
+            status=_by_index(MilestoneStatus, int(values[4])),
+        )
+
+
+@dataclass(frozen=True)
+class Payout:
+    """One payout attempt, decoded from `IAgentEscrowV2.PayoutSettled`.
+
+    A transfer that fails — a blacklisted recipient, a token that returns false — never blocks a
+    job: the escrow parks the amount as claimable for `account` instead, recoverable later with
+    `withdraw_claimable`. Both outcomes leave the transaction successful, so :attr:`delivered` is
+    the only way to tell them apart without re-reading the chain.
+    """
+
+    account: str
+    #: Base units moved, net of protocol fee where a fee applied.
+    amount: int
+    #: True when the tokens reached `account`; False when they were parked as claimable.
+    delivered: bool
+
+    @classmethod
+    def from_args(cls, args: Mapping[str, Any]) -> "Payout":
+        return cls(
+            account=str(args["account"]),
+            amount=int(args["amount"]),
+            delivered=bool(args["delivered"]),
         )
 
 
@@ -270,29 +311,40 @@ class ActionLog:
 
 @dataclass(frozen=True)
 class CreateParams:
-    """`IAgentEscrowV2.CreateParams`. Amounts are in payment-token base units (USDC: 6 decimals)."""
+    """`IAgentEscrowV2.CreateParams`.
+
+    `milestone_amounts` are USDC figures in dollars (``["100", "150.50"]``); pass ints only when
+    you already hold base units. :meth:`base_unit_amounts` and :attr:`total` do the conversion.
+    """
 
     client: str
     provider: str
-    milestone_amounts: Sequence[int]
+    milestone_amounts: Sequence[UsdcAmount]
     deadline: int
     arbiter: str = ZERO_ADDRESS
     terms_hash: bytes = ZERO_BYTES32
 
-    def to_tuple(self) -> tuple[str, str, str, list[int], int, bytes]:
-        """Solidity struct ordering for web3 encoding."""
-        amounts = [int(a) for a in self.milestone_amounts]
+    def base_unit_amounts(self) -> list[int]:
+        """The milestone amounts in base units, in order."""
+        amounts = [
+            to_base_units(a, f"milestone_amounts[{i}]") for i, a in enumerate(self.milestone_amounts)
+        ]
         if not amounts:
             raise ValueError("at least one milestone amount is required")
+        return amounts
+
+    def to_tuple(self) -> tuple[str, str, str, list[int], int, bytes]:
+        """Solidity struct ordering for web3 encoding."""
         return (
             self.client,
             self.provider,
             self.arbiter,
-            amounts,
+            self.base_unit_amounts(),
             int(self.deadline),
             coerce_bytes32(self.terms_hash),
         )
 
     @property
     def total(self) -> int:
-        return sum(int(a) for a in self.milestone_amounts)
+        """Sum of the milestones, in base units."""
+        return sum(self.base_unit_amounts())

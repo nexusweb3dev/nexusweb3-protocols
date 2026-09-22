@@ -16,13 +16,34 @@ Optional env (defaults in `script/v2/DeployCore.s.sol`):
 
 | Var | Default | Notes |
 |---|---|---|
-| `OWNER` | deployer | set to the multisig once you have one |
+| `OWNER` | deployer | ownership is two-step (`Ownable2Step`) on all six owned contracts — set to the multisig once you have one, then complete step 1b |
 | `TREASURY` | owner | fee sink |
 | `STAKING_RECIPIENT` | treasury | point at AgentStaking (v1) or a pool later |
 | `REFERRAL` | 0 | v1 AgentReferral `0xc7774DEBC022Eb5A1cE619F612e85AD40bd6D9A7`; if set, also run step 3b |
 | `ERC8004_REGISTRY` | 0 | Base canonical: `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` |
-| `PAYMENT_TOKEN` | Base USDC | Sepolia USDC: `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| `PAYMENT_TOKEN` | Base USDC | Sepolia USDC: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`; the escrow constructor reverts `ZeroAddress` if this address has no code, so a typo'd or EOA address fails fast at deploy instead of on first job |
 | `ESCROW_FEE_BPS` | 0 | keep 0 until there is usage |
+
+### 0b. If `OWNER` != deployer (two-step ownership)
+
+`AgentIdentityV2`, `AgentReputationV2`, `AgentAuditLogV2`, `AgentKillSwitchV2`, `AgentEscrowV2`,
+and `FeeRouter` are all `Ownable2Step`. `DeployCore.s.sol` calls `transferOwnership(OWNER)` on
+each, but that only *proposes* the new owner — nothing transfers until the new owner calls
+`acceptOwnership()` itself, on every one of the six contracts, from `OWNER`'s own key:
+
+```bash
+CHAINID=8453   # or 84532 for Sepolia
+DEPLOY_JSON=deployments/v2-$CHAINID.json
+for C in AgentIdentityV2 AgentReputationV2 AgentAuditLogV2 AgentKillSwitchV2 AgentEscrowV2 FeeRouter; do
+  ADDR=$(jq -r .$C $DEPLOY_JSON)
+  echo "acceptOwnership: $C ($ADDR)"
+  cast send --rpc-url $RPC --private-key $NEW_OWNER_KEY $ADDR "acceptOwnership()"
+done
+```
+
+Until every `acceptOwnership()` call lands, the deployer key remains the live owner (able to set
+fees, modules, and pause). For the mainnet run, `OWNER` should be a multisig, not an EOA — run the
+loop above from the multisig's own transaction flow (e.g. Safe), not a single private key.
 
 ## 1. Base Sepolia dry run (do this first)
 
@@ -66,12 +87,20 @@ Repeat the four `isAuthorizedProtocol` checks with `RPC=https://mainnet.base.org
 
 ### 3b. Only if REFERRAL was set
 
-The v1 referral contract must authorize the router to record fees:
+The v1 `AgentReferral` contract must call `authorizeProtocol(FeeRouter)` on itself before it will
+pay out referral fees for v2 jobs. `DeployCore.s.sol` attempts this automatically during `_wire`
+using the deployer key, and logs a loud `WARNING` if it fails (the deployer usually isn't
+`AgentReferral`'s owner). Check the deploy output; if you see the warning, run it manually from
+whichever key does own `AgentReferral`:
 
 ```bash
-cast send --rpc-url https://mainnet.base.org --private-key $PRIVATE_KEY \
+cast send --rpc-url https://mainnet.base.org --private-key $REFERRAL_OWNER_KEY \
   0xc7774DEBC022Eb5A1cE619F612e85AD40bd6D9A7 "authorizeProtocol(address)" $(jq -r .FeeRouter deployments/v2-8453.json)
 ```
+
+Until this succeeds, `route()` will hit `ReferralCallFailed` for every job with a referred agent —
+routing still completes (staking/treasury get the referral's share) but no one gets paid a
+referral fee.
 
 ## 3. Pause deprecated v1 contracts (mainnet)
 
@@ -114,5 +143,8 @@ Left running: AgentVaultFactory, AgentYield, AgentStaking, AgentWhitelist, Agent
 ## 4. After deploy
 
 1. Paste the 8453 JSON addresses into `README.md` (v2 table) and `deployments/DEPLOYMENTS.md`.
-2. Register our own agents (ATLAS treasury wallet) via the SDK — first non-zero usage.
-3. Commit + push.
+2. If `OWNER` != deployer, complete step 0b: have the new owner (multisig, ideally) call
+   `acceptOwnership()` on all six `Ownable2Step` contracts. Until then the deployer key is still
+   the live owner.
+3. Register our own agents (the treasury wallet) via the SDK — first non-zero usage.
+4. Commit + push.

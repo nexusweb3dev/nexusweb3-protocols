@@ -16,10 +16,17 @@ integrated v1 `AgentRegistry`, `AgentEscrow`, `AgentMilestone`, `AgentMarket`, `
 
 - **Identity** — a free, permanent on-chain profile (name, metadata URI, type), optionally linked
   to a canonical ERC-8004 `agentId`.
-- **Hire / get hired** — milestone escrow between a client and a provider, with an optional
-  arbiter for disputes and a hard deadline refund if no arbiter is set.
-- **Reputation** — every settled escrow milestone writes a value-weighted score to the *principal*,
-  not the hot key. Free to read.
+- **Hire / get hired** — milestone escrow between a client and a provider. `createJob` is only an
+  offer until the provider calls `acceptJob`; after that an optional independent arbiter can
+  resolve disputes, and anything past its expiry settles by rule (submitted work pays the
+  provider, unsubmitted work refunds the client) even if the arbiter goes silent.
+- **Reputation** — a settled escrow milestone or resolved dispute writes a value-weighted score to
+  the *principal*, not the hot key, but only if the settled (or disputed) amount is at or above
+  `MIN_REPUTATION_VALUE` (10 USDC) — that floor gates a *negative* event just as much as a
+  positive one, so a dust-sized dispute can neither farm reputation nor grief it. A resolved
+  dispute that splits exactly 50/50 is neutral, and each client/provider pair is capped at 10
+  recorded events (only spent when an event actually clears the floor) to bound wash-trading
+  between principals one party controls. Free to read.
 - **Audit trail** — an append-only, free, on-chain log of your own actions and the actions
   protocols take on your behalf.
 - **Kill switch (opt-in)** — a per-session spending/tx cap enforced by the escrow contract before
@@ -38,7 +45,19 @@ disposable **hot key** — the one your automated agent process actually holds a
 `provider`) parameter: your hot key calls the function and passes your **principal's address** in
 that slot. The contract checks `AgentAccess.isOperatorFor(principal, msg.sender)` internally, so
 the hot key never needs to hold funds. If the hot key leaks, revoke it and authorize a new one —
-your identity, reputation and job history stay with the principal untouched.
+your identity, reputation and job history stay with the principal untouched. The hot key can also
+revoke itself with `AgentAccess.renounceOperator(principal)` the instant it suspects it's been
+compromised, with no principal key needed at all — wire your agent process to call this
+defensively on any anomaly it detects in itself.
+
+`isOperatorFor` is always the authoritative "is this currently valid" check. The lower-level
+`AgentAccess.operatorExpiry(agent, operator)` is a raw storage read and can return a non-zero
+timestamp that has already passed — never treat a non-zero `operatorExpiry` as proof of a live
+authorization; use `isOperatorFor`.
+
+A leaked hot key is still not harmless just because it can't hold funds directly — see
+"Operator key blast radius" in `docs/MIGRATION.md` for what a compromised client operator key can
+do to your allowance, and why `createJobWithPermit` and a registered kill switch matter.
 
 One exception: `AgentKillSwitchV2` config changes (`register`, `setLimits`, `setGuardian`,
 `resume`) are **principal-only, never operator** — see section 6.
@@ -92,14 +111,41 @@ cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY \
   $PRINCIPAL "my-trading-bot" "https://api.example.com/agent.json" 3
 ```
 
+`name` is restricted to the lowercase ASCII set `[a-z0-9-_.]` (1..64 bytes) — anything else reverts
+`InvalidName`.
+
 From here your hot key can create jobs, submit deliverables, approve/reject, dispute, and log
 actions — always passing `$PRINCIPAL` as the `agent`/`client`/`provider` argument.
 
 ## 4. Hire an agent
 
+### Job lifecycle
+
+```text
+createJob            -> Open (an OFFER: funds locked, provider not yet bound)
+provider acceptJob    -> Open + accepted (job is live; disputes/reputation now apply)
+client cancelJob      -> Cancelled, full refund (any time before acceptance; after
+                          acceptance only while no milestone has ever been submitted)
+provider submitMilestone(i)  Pending -> Submitted (only while now <= deadline; at most
+                              MAX_REJECTIONS=3 resubmissions after rejections)
+client approveMilestone(i)   -> Approved, pays provider minus fee (works even if not Submitted)
+client rejectMilestone(i)    Submitted -> Pending (only inside the 7-day review window)
+provider claimApproval(i)    Submitted, unreviewed 7 days -> Approved
+all milestones approved      -> Completed
+either party dispute          -> Disputed (needs an arbiter, accepted, before expiry)
+arbiter resolve(providerBps) -> Resolved (remaining funds split)
+anyone settleExpired          -> Expired: Submitted milestones pay the provider,
+                                  Pending milestones refund the client
+```
+
+Until the provider calls `acceptJob(jobId)`, the job is only an offer: nothing can be submitted,
+approved, or disputed, and no reputation is recorded either way. The client can `cancelJob` for a
+full refund at any point up to and including right after acceptance — the only thing that blocks
+`cancelJob` is a milestone having ever been submitted.
+
 ```bash
 export PROVIDER=0xProviderPrincipalAddress
-export ARBITER=0x0000000000000000000000000000000000000000   # or a trusted arbiter address
+export ARBITER=0x0000000000000000000000000000000000000000   # or a trusted, independent arbiter address
 export DEADLINE=$(( $(date +%s) + 604800 ))                  # 7 days
 
 cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY $ESCROW \
@@ -111,17 +157,30 @@ Replace the last field with a real hash of your off-chain terms document, e.g.
 `cast keccak "$(cat terms.json)"`. The two milestone amounts are USDC (6 decimals): $100 then
 $150. `createJob` returns `jobId` in the transaction receipt logs (`JobCreated`).
 
-Check status any time:
+If you set a non-zero `$ARBITER`, the contract checks on-chain (via `AgentAccess.operatorExpiry`)
+that the arbiter is not an operator of you or the provider, and that neither of you is an operator
+of the arbiter — the transaction reverts with `InvalidParty` otherwise. The check uses live
+authorizations only (`operatorExpiry` returns 0 once a grant has lapsed), so a former operator
+whose grant expired is eligible again. That check only catches operator relationships; it cannot detect an arbiter
+address the client secretly controls through some other principal, so as the provider you should
+still independently vet whoever you agree to.
+
+As the client you don't hold the provider's key, but nothing else in this section works until the
+provider calls `acceptJob(jobId)` on its own (see section 5 for that side). Check status any time
+— the `Job` tuple's 9th field, `acceptedAt`, is `0` until the provider accepts:
 
 ```bash
 cast call --rpc-url $RPC $ESCROW \
-  "getJob(uint256)((address,address,address,uint256,uint256,uint256,uint48,uint48,uint8,uint8,uint8,bytes32))" 42
+  "getJob(uint256)((address,address,address,uint256,uint256,uint256,uint48,uint48,uint48,uint48,uint8,uint8,bool,uint8,bytes32))" 42
 cast call --rpc-url $RPC $ESCROW \
-  "getMilestones(uint256)((uint256,bytes32,uint48,uint8)[])" 42
+  "getMilestones(uint256)((uint256,bytes32,uint48,uint8,uint8)[])" 42
 ```
 
-`status` is `0 Open, 1 Completed, 2 Cancelled, 3 Disputed, 4 Resolved, 5 Expired`. Milestone
-`status` is `0 Pending, 1 Submitted, 2 Approved`.
+`Job` fields in order: `client, provider, arbiter, total, released, refunded, deadline, createdAt,
+acceptedAt, disputedAt, milestoneCount, approvedCount, everSubmitted, status, termsHash`. `status`
+is `0 Open, 1 Completed, 2 Cancelled, 3 Disputed, 4 Resolved, 5 Expired`. `Milestone` fields:
+`amount, deliverableHash, submittedAt, rejections, status`, where milestone `status` is
+`0 Pending, 1 Submitted, 2 Approved`.
 
 When the provider submits, approve to release payment (minus fee, currently 0):
 
@@ -132,20 +191,30 @@ cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY \
 
 **If you're unhappy with the deliverable, you have three options:**
 1. **Reject** — sends the milestone back to `Pending` so the provider can resubmit. Costs nothing.
+   Only works inside the 7-day review window (`ReviewWindowClosed` after that — the milestone is
+   already vested to the provider). A milestone rejected `MAX_REJECTIONS` (3) times can never be
+   resubmitted (`TooManyRejections`); it then just refunds to you when the job settles.
    ```bash
    cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY \
      $ESCROW "rejectMilestone(uint256,uint8,bytes32)" 42 0 $(cast keccak "deliverable missing X")
    ```
-2. **Dispute** — only works if the job has a non-zero `arbiter`. Freezes the job until the arbiter
-   calls `resolve(jobId, providerBps)`.
+2. **Dispute** — only works if the job has a non-zero, independent `arbiter` and only before the
+   job's expiry. Freezes the job until the arbiter calls `resolve(jobId, providerBps)`, or for
+   30 days, after which anyone can `settleExpired` it by rule (submitted work still pays the
+   provider — a silent arbiter no longer defaults to you).
    ```bash
    cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY \
      $ESCROW "dispute(uint256,bytes32)" 42 $(cast keccak "work does not match terms")
    ```
-3. **Do nothing** — if there's no arbiter, let the `deadline` pass. Anyone can then call
-   `refundExpired(jobId)` and unreleased funds return to you. You can also `cancelJob(jobId)`
-   yourself any time before a milestone is `Submitted` or `Approved`, for a full refund of the
-   unreleased balance.
+3. **Do nothing** — if there's no arbiter, let the job's expiry pass (`expiryOf(jobId)`). Anyone
+   can then call `settleExpired(jobId)`: every `Pending` milestone refunds to you, every
+   `Submitted` one pays the provider. You can also `cancelJob(jobId)` yourself any time before or
+   right after acceptance, for a full refund of the unreleased balance — but once any milestone
+   has ever been submitted, `cancelJob` no longer works (`CannotCancel`).
+   ```bash
+   cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY \
+     $ESCROW "settleExpired(uint256)" 42
+   ```
 
 ## 5. Get hired
 
@@ -158,20 +227,27 @@ cast logs --rpc-url $RPC --address $ESCROW \
   "JobCreated(uint256,address,address,address,uint256,uint48)" --from-block 24000000
 ```
 
-Once you see a job with `provider == $PRINCIPAL`, submit your deliverable (hash the actual work
-off-chain, don't put the answer itself on-chain):
+Once you see a job with `provider == $PRINCIPAL`, accept it — nothing else works until you do,
+and reputation/disputes don't apply to an unaccepted offer:
+
+```bash
+cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY $ESCROW "acceptJob(uint256)" 42
+```
+
+Then submit your deliverable (hash the actual work off-chain, don't put the answer itself
+on-chain), only before the job's `deadline`:
 
 ```bash
 cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY \
   $ESCROW "submitMilestone(uint256,uint8,bytes32)" 42 0 $(cast keccak "$(cat deliverable.json)")
 ```
 
-The client then approves (you get paid automatically, no separate claim step unless you were
-paid via the `claimable`/`withdrawClaimable` fallback path used when a direct transfer would
-fail) or rejects (resubmit) or disputes (wait for the arbiter). If the client goes silent and
+The client then approves (you get paid automatically, no separate claim step unless the direct
+transfer failed, e.g. a blacklisted address, in which case it parks as `claimable`) or rejects
+(resubmit, up to 3 times) or disputes (wait for the arbiter). If the client goes silent and
 there's an arbiter, you may also call `dispute` — but only before the job expiry. You are not at
 the client's mercy: a milestone you submitted that the client neither approves, rejects nor
-disputes for 7 days can be claimed by you:
+disputes for 7 days is already vested to you and can be claimed:
 
 ```bash
 cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY $ESCROW \
@@ -179,8 +255,17 @@ cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY $ESCROW \
 ```
 
 `expiryOf(uint256)(uint48)` tells you when the job expires (deadline, extended by 7 days after any
-live submission). Milestones you never submitted refund to the client at expiry — factor deadlines
-into your pricing and submit early.
+live submission). Milestones you never submitted (or that hit `MAX_REJECTIONS` and stayed
+`Pending`) refund to the client at expiry — factor deadlines into your pricing and submit early.
+
+If a payout ever lands as `claimable` instead of transferring directly, pull it to any address —
+not just yourself — with `withdrawClaimable`:
+
+```bash
+cast call --rpc-url $RPC $ESCROW "claimable(address)(uint256)" $PRINCIPAL
+cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY \
+  $ESCROW "withdrawClaimable(address,address)" $PRINCIPAL $PAYOUT_ADDRESS
+```
 
 ## 6. Reputation & trust checks before dealing
 
@@ -209,9 +294,12 @@ cast call --rpc-url $RPC $AUDITLOG \
   $PROVIDER 0 20
 ```
 
-**Gas.** On `approveMilestone`, `claimApproval` and `resolve` pass `--gas-limit 1500000`. The
-escrow reserves a fixed gas stipend for its reputation and audit-log writes and reverts with
-`InsufficientGas(required)` if you did not supply it, so these writes are never dropped silently.
+**Gas.** Every fund-moving call reserves a fixed gas stipend for its reputation, audit-log, and
+fee-routing writes, and reverts with `InsufficientGas(required)` if you did not supply it — these
+writes are never dropped silently. Pass `--gas-limit 1500000` on `approveMilestone`,
+`claimApproval`, `settleExpired`, and `resolve` (~1.2M gas floor); `createJob`, `cancelJob`,
+`dispute`, `rejectMilestone`, and `submitMilestone` need less (~700k), but 1,500,000 is a safe
+flat value for all of them.
 
 ## 7. Safety — protect your principal
 
@@ -235,13 +323,36 @@ cast send --rpc-url $RPC --private-key $GUARDIAN_KEY $KILLSWITCH "kill(address)"
 cast send --rpc-url $RPC --private-key $GUARDIAN_KEY $KILLSWITCH "pause(address)" $PRINCIPAL
 ```
 
-Only the principal can `resume()` after a `kill`. If your hot key itself is the thing that leaked,
-revoke it instead of (or in addition to) killing the agent:
+Only the principal can `resume()` after a `kill` — and only the principal, never the guardian, can
+`resetSession`, since a reset restores spending headroom rather than restricting it:
+
+```bash
+cast send --rpc-url $RPC --private-key $PRINCIPAL_KEY \
+  $KILLSWITCH "resetSession(address)" $PRINCIPAL
+```
+
+`remainingSpend(address)(uint256)` returns how much you can still spend this session. It returns
+`0` (not a revert) if you've lowered your `spendingLimit` below what you've already spent this
+session, and the max possible value for an unregistered agent (no limits configured).
+
+If your hot key itself is the thing that leaked, revoke it instead of (or in addition to) killing
+the agent:
 
 ```bash
 cast send --rpc-url $RPC --private-key $PRINCIPAL_KEY \
   $ACCESS "revokeOperator(address)" $HOTKEY_ADDRESS
 ```
+
+If the compromised process is the hot key itself and it's still able to sign, it doesn't need to
+wait on the principal — it can drop its own authorization immediately:
+
+```bash
+cast send --rpc-url $RPC --private-key $NEXUS_OPERATOR_KEY \
+  $ACCESS "renounceOperator(address)" $PRINCIPAL
+```
+
+See "Operator key blast radius" in `docs/MIGRATION.md` for what a leaked operator key can still do
+before you catch it, and why a kill switch and `createJobWithPermit` are the real mitigations.
 
 ## 8. Fees
 
@@ -250,20 +361,29 @@ cast call --rpc-url $RPC $ESCROW "feeBps()(uint256)"
 ```
 
 Currently `0`. If governance turns the fee on, it's deducted from the provider's payout at
-`approveMilestone`/`resolve` time and routed automatically through `FeeRouter` — you never call
-`FeeRouter` yourself. `FeeRouter.split()` shows how a nonzero fee would be divided between
-staking and treasury if you want to check before it matters.
+`approveMilestone`/`claimApproval`/`settleExpired`/`resolve` time and routed automatically through
+`FeeRouter` — you never call `FeeRouter` yourself. `FeeRouter.split()` shows how a nonzero fee
+would be divided between staking and treasury if you want to check before it matters. If a
+referral program is configured and the v1 `AgentReferral` contract rejects the payout for any
+reason, the router emits `ReferralCallFailed(agent, amount)` and continues routing the rest to
+staking/treasury — a broken referral link never blocks your payout.
 
 ## 9. Errors you will see and what they mean
 
 **AgentAccess** — `SelfOperator` you tried to authorize yourself; `ExpiryInPast` your expiry
 timestamp already passed; `NotOperator(agent, caller)` your hot key isn't authorized for that
-principal (or the authorization expired).
+principal (or the authorization expired) — also returned by `revokeOperator`/`renounceOperator`
+if there's no matching authorization record to remove.
 
 **AgentIdentityV2** — `AlreadyRegistered` that principal already has a profile; `NotRegistered`
-no profile exists yet; `NameTaken` pick a different unique name; `NotERC8004Owner` you don't own
-the ERC-8004 `agentId` you're trying to link; `ERC8004NotConfigured` the registry link feature is
-off on this deployment.
+no profile exists yet; `NameTaken` pick a different unique name; `InvalidName` your `name` used a
+character outside the allowed `[a-z0-9-_.]` set (or was empty/too long — see `EmptyName` /
+`NameTooLong`); `NotERC8004Owner` you don't own the ERC-8004 `agentId` you're trying to link;
+`ERC8004NotConfigured` the registry link feature is off on this deployment; `InvalidERC8004Id` you
+tried to link `agentId` `0`, which is reserved and always invalid. Note: if the registry address
+is ever updated (`registryEpoch` bumps), every existing link reads back as unlinked —
+`erc8004IdOf`/`agentOfERC8004` return `0`/`address(0)` — and must be re-linked against the new
+registry.
 
 **AgentReputationV2** — `NotAuthorizedProtocol` only `AgentEscrowV2` (and other authorized
 protocols) can write scores; agents never call `recordInteraction` directly. `InvalidCategory`
@@ -283,14 +403,24 @@ the max size; `LengthMismatch` your batch arrays aren't the same length.
 **AgentEscrowV2** — `JobNotFound` / `MilestoneNotFound` bad id; `WrongJobStatus` /
 `WrongMilestoneStatus` the job/milestone isn't in the state that action requires (e.g. approving a
 milestone on a `Cancelled` job); `NotClient` / `NotProvider` / `NotParty` you (or your operator
-principal) aren't the right side of this job; `NotArbiter` / `NoArbiter` you called `resolve`
+principal) aren't the right side of this job; `NotAccepted` the provider hasn't called `acceptJob`
+yet, so submit/approve/reject/dispute/claim all revert; `AlreadyAccepted` the provider tried to
+`acceptJob` a job it (or someone) already accepted; `NotArbiter` / `NoArbiter` you called `resolve`
 without being the arbiter, or the job has no arbiter set so `dispute` will also revert;
-`CannotCancel` a milestone is already `Submitted` or `Approved`, so `cancelJob` is blocked;
-`DeadlineNotReached` you called `refundExpired` too early (check `expiryOf`); `DeadlinePassed` you tried to
-`dispute` after the job expiry — afterwards the job can only be refunded via `refundExpired`;
-`ReviewWindowOpen` you called `claimApproval` before the 7-day review window closed (the error
-carries the timestamp when it opens); `ProviderInactive` the provider is killed or paused in
-`AgentKillSwitchV2` — check `isActive(provider)` before creating the job.
+`CannotCancel` a milestone has ever been `Submitted` (or one is `Approved`), so `cancelJob` is
+blocked — before that point `cancelJob` always works for a full refund; `DeadlineNotReached` you
+called `settleExpired` too early (check `expiryOf` for `Open` jobs, or wait the full 30-day
+`DISPUTE_GRACE` after `disputedAt` for `Disputed` ones); `DeadlinePassed` you tried to `acceptJob`
+or `submitMilestone` after the deadline, or `dispute` after the job's expiry — from there the job
+can only be settled via `settleExpired`; `ReviewWindowOpen` you called `claimApproval` before the
+7-day review window closed (the error carries the timestamp when it opens); `ReviewWindowClosed`
+you tried to `rejectMilestone` more than 7 days after it was submitted — it's already vested to
+the provider; `TooManyRejections` you tried to `submitMilestone` again after 3 rejections — that
+milestone stays `Pending` and only refunds to the client at `settleExpired`; `TokenAmountMismatch`
+`createJob`/`createJobWithPermit` received less than the milestone total from the token transfer
+(fee-on-transfer guard — this deployment is USDC-only and expects an exact transfer);
+`ProviderInactive` the provider is killed or paused in `AgentKillSwitchV2` — checked at both
+`createJob` and `acceptJob`, so verify `isActive(provider)` before either call.
 
 **FeeRouter** — `NotAuthorizedProtocol` only the escrow (or other authorized protocol) can call
 `route`; not something agents call directly.

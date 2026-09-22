@@ -1,7 +1,7 @@
 # NexusWeb3
 
 ![Base](https://img.shields.io/badge/Base-Mainnet-0052FF)
-![Tests](https://img.shields.io/badge/Tests-1562%20Passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-see%20CHANGELOG-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT--0-green)
 ![v2](https://img.shields.io/badge/v2-core%20stack-blue)
 
@@ -22,7 +22,7 @@ v1 shipped 30 isolated contracts in March 2026. Six months later they had zero u
 | Who signs | the agent address, for everything | a cold **principal** authorizes hot **operator** keys; hot keys never hold USDC |
 | Fees | ETH + USDC per call, paid reads | USDC only, fee switch off, all reads free |
 | Composition | isolated | Escrow → Reputation + AuditLog + KillSwitch + FeeRouter, wired at deploy |
-| Disputes | owner decides | party-chosen arbiter, or deadline refund; silent clients cannot run out the clock (7-day review window) |
+| Disputes | owner decides | party-chosen, on-chain-verified independent arbiter, or expiry settlement; silent clients (and silent arbiters) cannot run out the clock (7-day review window, 30-day dispute grace) |
 | Identity | $5, expiring, proprietary | free, permanent, links to [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) |
 
 Full write-up: `docs/MIGRATION.md`, `docs/DEPRECATIONS.md`.
@@ -51,9 +51,10 @@ Principal (cold key, holds USDC)
 
 Hot key (operator) — passes the principal as `agent`
   4. AgentIdentityV2.register(principal, "my-agent", "ipfs://…agent.json", type)
-  5. AgentEscrowV2.createJob({client: principal, provider, arbiter, milestoneAmounts, deadline, termsHash})
-  6. provider: AgentEscrowV2.submitMilestone(jobId, i, deliverableHash)
-  7. client:   AgentEscrowV2.approveMilestone(jobId, i)   → provider paid; Reputation + AuditLog written
+  5. AgentEscrowV2.createJob({client: principal, provider, arbiter, milestoneAmounts, deadline, termsHash})   → offer only
+  6. provider: AgentEscrowV2.acceptJob(jobId)             → job is live; disputes/reputation now apply
+  7. provider: AgentEscrowV2.submitMilestone(jobId, i, deliverableHash)
+  8. client:   AgentEscrowV2.approveMilestone(jobId, i)   → provider paid; Reputation + AuditLog written
      (client silent for 7 days after a submission → provider: claimApproval(jobId, i))
 ```
 
@@ -93,14 +94,19 @@ Both SDKs ship an end-to-end script that runs the full hire → deliver → appr
 
 ## Security
 
-- 1562 tests: 1138 v1 + 424 v2 (unit, fuzz at 1000 runs, and a cross-contract lifecycle suite in `test/v2/Integration.t.sol`).
+- Test counts: see `CHANGELOG.md` for the current v1/v2 unit, fuzz, and invariant totals.
+- Security audit: `reviews/v2/V2-SECURITY-AUDIT.md` (in progress) covers the post-hardening v2 contracts, including the offer/accept lifecycle, `settleExpired` rule engine, and arbiter independence check.
+- Property-based coverage: a Foundry invariant suite in `test/v2/invariants/` (funds-conservation, status-transition, and reputation-cap invariants) plus Halmos symbolic proofs in `test/v2/symbolic/` for the escrow's core arithmetic.
 - Slither on `src/v2`: no high/medium findings. `nonReentrant` on every fund-moving function, CEI, SafeERC20, claimable fallback for blocked recipients, custom errors only.
-- Module outages never lock funds: Reputation and AuditLog writes and fee routing are best-effort; Escrow pause blocks only new jobs.
-- Best-effort hooks cannot be starved: each hook has a gas floor (`HOOK_GAS_*`) and the call reverts with `InsufficientGas` if the sender did not supply it, so gas estimation always includes the reputation and audit writes (`test_gasFloor_noLimitDropsHooksSilently`).
-- Owner powers in v2 are limited to: fee switch (max 5%), module addresses, pausing job creation, and protocol authorization. No owner can move user funds or decide a dispute.
+- Module outages never lock funds: Reputation and AuditLog writes and fee routing are best-effort; Escrow pause blocks only new jobs. A failed v1 referral payout emits `ReferralCallFailed` and routing continues to staking/treasury.
+- Best-effort hooks cannot be starved: each hook has a gas floor (`HOOK_GAS_*`) and the call reverts with `InsufficientGas` if the sender did not supply it, so gas estimation always includes the reputation and audit writes.
+- Reputation wash-trading is bounded, not prevented: at most 10 recorded events per client/provider pair (only spent when an event is actually written), and only a settled or disputed amount of $10+ (`MIN_REPUTATION_VALUE`) moves a score at all, positive or negative; a principal willing to spin up many counterparties still pays only gas while the fee switch is at 0.
+- A leaked operator (hot) key is bounded by design choices, not the protocol alone: see "Operator key blast radius" in `docs/MIGRATION.md` for why a registered kill switch and `createJobWithPermit` matter, and `AgentAccess.renounceOperator` for self-revocation without the principal key.
+- `AgentEscrowV2`'s constructor rejects a `paymentToken` address with no code, catching a misconfigured deploy before first use.
+- Owner powers in v2 are limited to: fee switch (max 5%), module addresses, pausing job creation, and protocol authorization. No owner can move user funds or decide a dispute. Ownership on all six `Ownable2Step` v2 contracts transfers only after the new owner calls `acceptOwnership()` (see runbook) — a multisig is recommended for mainnet.
 - Disclosure policy and history: `SECURITY.md`. v1 issue #2 (AgentInsolvency) fix is on branch `fix/insolvency-late-confirm-drain`.
 
-v2 has not yet had an external audit. Fee switch stays at 0 and the stack is deployed to Base Sepolia first (see runbook).
+v2 has not yet had a completed external audit (see `reviews/v2/V2-SECURITY-AUDIT.md` for status). Fee switch stays at 0 and the stack is deployed to Base Sepolia first (see runbook).
 
 ## v1 contracts
 
@@ -111,8 +117,9 @@ Eight v1 contracts stay supported: AgentVaultFactory/AgentVault, AgentYield, Age
 ```bash
 forge install
 forge build
-forge test                       # 1562 tests
+forge test                       # see CHANGELOG for current count
 forge test --match-path 'test/v2/*'
+forge test --match-path 'test/v2/invariants/*'
 slither src/v2 --filter-paths "lib|test|script"
 ```
 
@@ -124,13 +131,14 @@ Requires [Foundry](https://book.getfoundry.sh/). Local full-stack deploy: `scrip
 src/            v1 contracts (31)
 src/v2/         v2 core (7 contracts + interfaces)
 test/           v1 tests · test/v2/ v2 unit + integration tests
+                test/v2/invariants/ Foundry invariant suite · test/v2/symbolic/ Halmos proofs
 script/         v1 deploy scripts · script/v2/ DeployCore + DeployLocal
 sdk/ts          TypeScript SDK + MCP server
 sdk/python      Python SDK + CLI
 deployments/    addresses, V2-RUNBOOK.md
 docs/           MIGRATION.md, DEPRECATIONS.md
 integrations/   agent skills (v1 + v2)
-reviews/        v1 audit reports
+reviews/        v1 audit reports · reviews/v2/ V2-SECURITY-AUDIT.md
 ```
 
 ## License

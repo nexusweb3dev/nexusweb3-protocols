@@ -2,13 +2,14 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IAgentReputationV2} from "./interfaces/IAgentReputationV2.sol";
 
 /// @title AgentReputationV2
 /// @notice Value-weighted on-chain reputation for AI agents. Authorized protocols record interactions;
 ///         every read is a free `view` — no query fees, no ETH handling anywhere in this contract.
-contract AgentReputationV2 is Ownable, Pausable, IAgentReputationV2 {
+contract AgentReputationV2 is Ownable2Step, Pausable, IAgentReputationV2 {
     /// @notice Starting score for every agent, including agents never recorded.
     uint256 public constant BASE_SCORE = 100;
     /// @notice Points added per positive interaction.

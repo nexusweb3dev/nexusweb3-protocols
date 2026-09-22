@@ -126,7 +126,46 @@
   },
   {
     "type": "function",
+    "name": "MAX_REJECTIONS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_REPUTATION_PER_PAIR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIN_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_REPUTATION_VALUE",
     "inputs": [],
     "outputs": [
       {
@@ -162,6 +201,26 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "acceptJob",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "acceptOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -499,6 +558,16 @@
             "internalType": "uint48"
           },
           {
+            "name": "acceptedAt",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "disputedAt",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
             "name": "milestoneCount",
             "type": "uint8",
             "internalType": "uint8"
@@ -507,6 +576,11 @@
             "name": "approvedCount",
             "type": "uint8",
             "internalType": "uint8"
+          },
+          {
+            "name": "everSubmitted",
+            "type": "bool",
+            "internalType": "bool"
           },
           {
             "name": "status",
@@ -582,6 +656,11 @@
             "name": "submittedAt",
             "type": "uint48",
             "internalType": "uint48"
+          },
+          {
+            "name": "rejections",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
             "name": "status",
@@ -686,16 +765,16 @@
   },
   {
     "type": "function",
-    "name": "refundExpired",
-    "inputs": [
+    "name": "pendingOwner",
+    "inputs": [],
+    "outputs": [
       {
-        "name": "jobId",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -819,6 +898,19 @@
   },
   {
     "type": "function",
+    "name": "settleExpired",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "submitMilestone",
     "inputs": [
       {
@@ -863,7 +955,18 @@
   {
     "type": "function",
     "name": "withdrawClaimable",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -897,6 +1000,12 @@
         "internalType": "address"
       },
       {
+        "name": "to",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
         "name": "amount",
         "type": "uint256",
         "indexed": false,
@@ -919,6 +1028,19 @@
         "name": "newBps",
         "type": "uint256",
         "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "JobAccepted",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "indexed": true,
         "internalType": "uint256"
       }
     ],
@@ -1035,7 +1157,13 @@
         "internalType": "uint256"
       },
       {
-        "name": "refund",
+        "name": "toProvider",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "toClient",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -1213,6 +1341,25 @@
   },
   {
     "type": "event",
+    "name": "OwnershipTransferStarted",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "OwnershipTransferred",
     "inputs": [
       {
@@ -1245,6 +1392,37 @@
   },
   {
     "type": "event",
+    "name": "PayoutSettled",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "delivered",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Unpaused",
     "inputs": [
       {
@@ -1255,6 +1433,17 @@
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AlreadyAccepted",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1387,6 +1576,17 @@
   },
   {
     "type": "error",
+    "name": "NotAccepted",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "NotAgentOrOperator",
     "inputs": [
       {
@@ -1495,6 +1695,22 @@
   },
   {
     "type": "error",
+    "name": "ReviewWindowClosed",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "index",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ReviewWindowOpen",
     "inputs": [
       {
@@ -1522,6 +1738,38 @@
         "name": "token",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TokenAmountMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "received",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyRejections",
+    "inputs": [
+      {
+        "name": "jobId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "index",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ]
   },

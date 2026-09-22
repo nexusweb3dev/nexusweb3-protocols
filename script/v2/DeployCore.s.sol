@@ -12,6 +12,11 @@ import {FeeRouter} from "../../src/v2/FeeRouter.sol";
 import {AgentEscrowV2} from "../../src/v2/AgentEscrowV2.sol";
 import {IAgentAccess} from "../../src/v2/interfaces/IAgentAccess.sol";
 
+/// @notice Minimal view of the v1 AgentReferral admin surface used to authorize the router.
+interface IAgentReferralAdmin {
+    function authorizeProtocol(address protocol) external;
+}
+
 /// @title DeployCore
 /// @notice Deploys the v2 core stack and wires every authorization in one broadcast, then writes
 ///         `deployments/v2-<chainId>.json`.
@@ -48,13 +53,27 @@ contract DeployCore is Script {
         address referral = vm.envOr("REFERRAL", address(0));
         address erc8004 = vm.envOr("ERC8004_REGISTRY", address(0));
         address token = vm.envOr("PAYMENT_TOKEN", BASE_USDC);
-        uint16 stakingBps = uint16(vm.envOr("STAKING_BPS", uint256(5000)));
-        uint16 treasuryBps = uint16(vm.envOr("TREASURY_BPS", uint256(5000)));
+        uint256 stakingBpsRaw = vm.envOr("STAKING_BPS", uint256(5000));
+        uint256 treasuryBpsRaw = vm.envOr("TREASURY_BPS", uint256(5000));
         uint256 escrowFeeBps = vm.envOr("ESCROW_FEE_BPS", uint256(0));
+
+        require(owner != address(0), "DeployCore: zero owner");
+        // L-05: validate before narrowing. A value above 65535 would otherwise wrap into a
+        // plausible-looking uint16 and deploy a router with a silently wrong split.
+        require(stakingBpsRaw <= 10_000, "DeployCore: STAKING_BPS > 10000");
+        require(treasuryBpsRaw <= 10_000, "DeployCore: TREASURY_BPS > 10000");
+        require(stakingBpsRaw + treasuryBpsRaw == 10_000, "DeployCore: bps must sum to 10000");
+
+        // casting to 'uint16' is safe because both values are checked to be <= 10_000 above
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint16 stakingBps = uint16(stakingBpsRaw);
+        // casting to 'uint16' is safe because both values are checked to be <= 10_000 above
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint16 treasuryBps = uint16(treasuryBpsRaw);
 
         vm.startBroadcast(pk);
         d = _deploy(deployer, treasury, stakingRecipient, referral, erc8004, token, stakingBps, treasuryBps);
-        _wire(d, escrowFeeBps);
+        _wire(d, referral, escrowFeeBps);
         if (owner != deployer) _transferOwnership(d, owner);
         vm.stopBroadcast();
 
@@ -85,15 +104,47 @@ contract DeployCore is Script {
     }
 
     /// @dev Every cross-contract permission the stack needs. Missing any of these is the v1 failure mode.
-    function _wire(Deployed memory d, uint256 escrowFeeBps) internal {
+    ///      The v1 AgentReferral must also accept the new router as a protocol, otherwise every
+    ///      referral payout silently fails inside the router's try/catch. The deployer is usually not
+    ///      the referral's owner, so this is attempted and loudly reported rather than assumed.
+    function _wire(Deployed memory d, address referral, uint256 escrowFeeBps) internal {
         d.reputation.authorizeProtocol(address(d.escrow));
         d.auditLog.authorizeProtocol(address(d.escrow));
         d.killSwitch.authorizeProtocol(address(d.escrow));
         d.feeRouter.authorizeProtocol(address(d.escrow));
         d.escrow.setModules(address(d.reputation), address(d.auditLog), address(d.killSwitch), address(d.feeRouter));
         if (escrowFeeBps > 0) d.escrow.setFeeBps(escrowFeeBps);
+
+        _assertWired(d);
+
+        if (referral != address(0)) {
+            try IAgentReferralAdmin(referral).authorizeProtocol(address(d.feeRouter)) {
+                console.log("referral: authorized FeeRouter on", referral);
+            } catch {
+                console.log("!!! WARNING: could not authorize FeeRouter on referral", referral);
+                console.log("!!! Referral payouts will silently pay nothing until the referral owner calls");
+                console.log("!!! authorizeProtocol(FeeRouter) on it. FeeRouter:", address(d.feeRouter));
+            }
+        }
     }
 
+    /// @dev L-06: read every permission back from chain state. A broadcast that lands only some of
+    ///      the wiring transactions must fail the script loudly instead of leaving a stack that looks
+    ///      deployed but silently skips reputation, audit logging, spend limits or fees.
+    function _assertWired(Deployed memory d) internal view {
+        address escrow = address(d.escrow);
+        require(d.reputation.isAuthorizedProtocol(escrow), "DeployCore: reputation not wired");
+        require(d.auditLog.isAuthorizedProtocol(escrow), "DeployCore: auditLog not wired");
+        require(d.killSwitch.isAuthorizedProtocol(escrow), "DeployCore: killSwitch not wired");
+        require(d.feeRouter.isAuthorizedProtocol(escrow), "DeployCore: feeRouter not wired");
+        require(d.escrow.reputation() == address(d.reputation), "DeployCore: escrow reputation not set");
+        require(d.escrow.auditLog() == address(d.auditLog), "DeployCore: escrow auditLog not set");
+        require(d.escrow.killSwitch() == address(d.killSwitch), "DeployCore: escrow killSwitch not set");
+        require(d.escrow.feeRouter() == address(d.feeRouter), "DeployCore: escrow feeRouter not set");
+    }
+
+    /// @dev All six contracts are `Ownable2Step`: this only *proposes* `owner`. The deployer stays
+    ///      owner until `owner` accepts on every contract, which is what makes a typo recoverable.
     function _transferOwnership(Deployed memory d, address owner) internal {
         d.identity.transferOwnership(owner);
         d.reputation.transferOwnership(owner);
@@ -101,6 +152,10 @@ contract DeployCore is Script {
         d.auditLog.transferOwnership(owner);
         d.feeRouter.transferOwnership(owner);
         d.escrow.transferOwnership(owner);
+
+        console.log("ACTION REQUIRED: ownership is only PROPOSED to", owner);
+        console.log("ACTION REQUIRED: that address must call acceptOwnership() on each of the six");
+        console.log("ACTION REQUIRED: contracts below. Until then the deployer remains owner.");
     }
 
     function _print(Deployed memory d, address owner) internal pure {

@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -21,20 +22,27 @@ import {IFeeRouter} from "./interfaces/IFeeRouter.sol";
 ///         address disables that hook. Reputation and audit-log writes are best-effort (try/catch)
 ///         so a module fault can never lock funds. Fee routing is atomic and best-effort (fee parks
 ///         as owner-claimable on failure). Kill-switch calls are strict by design.
-abstract contract EscrowBase is OperatorGated, Ownable, ReentrancyGuard, Pausable, IAgentEscrowV2 {
+abstract contract EscrowBase is OperatorGated, Ownable2Step, ReentrancyGuard, Pausable, IAgentEscrowV2 {
     using SafeERC20 for IERC20;
     using Math for uint256;
 
     uint256 public constant MAX_FEE_BPS = 500; // 5% hard cap
     uint256 public constant BPS = 10_000;
     uint8 public constant MAX_MILESTONES = 20;
+    uint8 public constant MAX_REJECTIONS = 3;
     uint256 public constant MIN_DURATION = 1 hours;
     uint256 public constant MAX_DURATION = 365 days;
-    /// @notice After deadline + grace, a still-disputed job can be refunded to the client by anyone.
+    /// @notice Arbiter gets this long from the dispute; afterwards anyone can settle by rule.
     uint256 public constant DISPUTE_GRACE = 30 days;
-    /// @notice A Submitted milestone the client neither approves nor rejects within this window can
-    ///         be claimed by the provider. Submissions also extend the job expiry by this window.
+    /// @notice A Submitted milestone the client neither approves nor rejects within this window
+    ///         belongs to the provider. Submissions also extend the job expiry by this window.
     uint256 public constant REVIEW_WINDOW = 7 days;
+    /// @notice Reputation is recorded for at most this many events per client/provider pair,
+    ///         which bounds wash-trading between two principals controlled by one party.
+    uint256 public constant MAX_REPUTATION_PER_PAIR = 10;
+    /// @notice Reputation is only recorded for settled or disputed amounts of at least this much
+    ///         (USDC, 6 decimals), so dust jobs cannot farm score or grief negatives for gas alone.
+    uint256 public constant MIN_REPUTATION_VALUE = 10_000_000;
     uint8 public constant REPUTATION_CATEGORY = 1; // ESCROW
     /// @notice Gas stipends forwarded to best-effort hooks. A call reverts with InsufficientGas if
     ///         the caller did not supply enough gas for the hook, so gas estimation can never
@@ -44,6 +52,7 @@ abstract contract EscrowBase is OperatorGated, Ownable, ReentrancyGuard, Pausabl
     uint256 public constant HOOK_GAS_FEE = 250_000;
 
     bytes32 internal constant ACT_CREATED = "ESCROW_JOB_CREATED";
+    bytes32 internal constant ACT_ACCEPTED = "ESCROW_JOB_ACCEPTED";
     bytes32 internal constant ACT_SUBMITTED = "ESCROW_MILESTONE_SUBMITTED";
     bytes32 internal constant ACT_APPROVED = "ESCROW_MILESTONE_APPROVED";
     bytes32 internal constant ACT_REJECTED = "ESCROW_MILESTONE_REJECTED";
@@ -65,9 +74,10 @@ abstract contract EscrowBase is OperatorGated, Ownable, ReentrancyGuard, Pausabl
     mapping(uint256 jobId => Milestone[]) internal _milestones;
     mapping(address account => uint256[]) internal _jobsOf;
     mapping(address account => uint256) internal _claimable;
+    mapping(address client => mapping(address provider => uint256)) internal _pairReputation;
 
     constructor(IAgentAccess access_, IERC20 token_, address owner_) OperatorGated(access_) Ownable(owner_) {
-        if (address(token_) == address(0)) revert ZeroAddress();
+        if (address(token_) == address(0) || address(token_).code.length == 0) revert ZeroAddress();
         _token = token_;
     }
 
@@ -178,7 +188,7 @@ abstract contract EscrowBase is OperatorGated, Ownable, ReentrancyGuard, Pausabl
         emit ModulesUpdated(reputation_, auditLog_, killSwitch_, feeRouter_);
     }
 
-    /// @notice Pause new job creation. Approvals, refunds and withdrawals always keep working.
+    /// @notice Pause new job creation. Everything else always keeps working.
     function pause() external onlyOwner {
         _pause();
     }
@@ -199,10 +209,22 @@ abstract contract EscrowBase is OperatorGated, Ownable, ReentrancyGuard, Pausabl
     }
 
     function _recordReputation(address agent, bool positive, uint256 value) internal {
-        if (address(_reputation) == address(0)) return;
         _requireGas(HOOK_GAS_REPUTATION);
         try _reputation.recordInteraction{gas: HOOK_GAS_REPUTATION}(agent, positive, REPUTATION_CATEGORY, value) {}
             catch {}
+    }
+
+    /// @dev Decides whether a reputation event may be written for this job, and only then spends
+    ///      one unit of the client/provider pair budget. `gate` is the settled or disputed amount:
+    ///      below MIN_REPUTATION_VALUE nothing is recorded in either direction, so dust jobs can
+    ///      neither farm positives nor grief negatives, and never consume the pair budget.
+    function _mayScore(Job storage job, uint256 gate) internal returns (bool) {
+        if (address(_reputation) == address(0)) return false;
+        if (gate < MIN_REPUTATION_VALUE) return false;
+        uint256 n = _pairReputation[job.client][job.provider];
+        if (n >= MAX_REPUTATION_PER_PAIR) return false;
+        _pairReputation[job.client][job.provider] = n + 1;
+        return true;
     }
 
     function _log(address agent, bytes32 actionType, uint256 jobId, uint8 index, uint256 value) internal {
@@ -244,11 +266,21 @@ abstract contract EscrowBase is OperatorGated, Ownable, ReentrancyGuard, Pausabl
         _feeRouter.route(agent, fee);
     }
 
+    /// @dev Pay `amount` to the provider minus protocol fee; returns net payout and fee.
+    function _payProvider(uint256 jobId, Job storage job, uint256 amount) internal returns (uint256 net, uint256 fee) {
+        fee = _fee(amount);
+        net = amount - fee;
+        _routeFee(job.provider, fee);
+        _payOut(jobId, job.provider, net);
+    }
+
     /// @dev Transfer with claimable fallback so a failing recipient (e.g. blacklisted) never blocks a job.
-    function _payOut(address to, uint256 amount) internal {
+    ///      Always emits PayoutSettled so indexers can tell delivered from parked amounts.
+    function _payOut(uint256 jobId, address to, uint256 amount) internal {
         if (amount == 0) return;
         (bool ok, bytes memory data) = address(_token).call(abi.encodeCall(IERC20.transfer, (to, amount)));
         bool success = ok && (data.length == 0 || abi.decode(data, (bool)));
+        emit PayoutSettled(jobId, to, amount, success);
         if (success) return;
         _claimable[to] += amount;
         emit ClaimableAdded(to, amount);
@@ -271,6 +303,10 @@ abstract contract EscrowBase is OperatorGated, Ownable, ReentrancyGuard, Pausabl
         if (job.status != expected) revert WrongJobStatus(jobId, job.status);
     }
 
+    function _requireAccepted(uint256 jobId, Job storage job) internal view {
+        if (job.acceptedAt == 0) revert NotAccepted(jobId);
+    }
+
     function _milestone(uint256 jobId, Job storage job, uint8 index) internal view returns (Milestone storage) {
         if (index >= job.milestoneCount) revert MilestoneNotFound(jobId, index);
         return _milestones[jobId][index];
@@ -281,6 +317,7 @@ abstract contract EscrowBase is OperatorGated, Ownable, ReentrancyGuard, Pausabl
     }
 
     /// @dev max(deadline, submittedAt + REVIEW_WINDOW over currently Submitted milestones).
+    ///      Submissions are only accepted while now <= deadline, so this is <= deadline + REVIEW_WINDOW.
     function _expiry(uint256 jobId, Job storage job) internal view returns (uint48 t) {
         t = job.deadline;
         Milestone[] storage ms = _milestones[jobId];

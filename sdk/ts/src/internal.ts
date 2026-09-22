@@ -6,7 +6,7 @@ import type {
   ContractFunctionName,
   Hash,
 } from 'viem';
-import { parseEventLogs } from 'viem';
+import { getAddress, isAddress, parseEventLogs } from 'viem';
 import type { Addresses } from './addresses.js';
 import {
   NexusError,
@@ -26,12 +26,15 @@ import {
  */
 export const DEFAULT_GAS_MULTIPLIER = 1.5;
 
+/** Upper bound on {@link NexusClientConfig.gasMultiplier}, so a bad config cannot ask for an absurd gas limit. */
+export const MAX_GAS_MULTIPLIER = 5;
+
 export interface NexusClientConfig {
   publicClient: NexusPublicClient;
   /** Required for every write; omit for a read-only client. */
   walletClient?: NexusWalletClient;
   addresses: Addresses;
-  /** Gas-estimate multiplier for writes. Default {@link DEFAULT_GAS_MULTIPLIER}; must be >= 1. */
+  /** Gas-estimate multiplier for writes. Default {@link DEFAULT_GAS_MULTIPLIER}; 1..{@link MAX_GAS_MULTIPLIER}. */
   gasMultiplier?: number;
 }
 
@@ -50,8 +53,10 @@ export interface Context {
 export function createContext(config: NexusClientConfig): Context {
   const { publicClient, walletClient, addresses } = config;
   const gasMultiplier = config.gasMultiplier ?? DEFAULT_GAS_MULTIPLIER;
-  if (!Number.isFinite(gasMultiplier) || gasMultiplier < 1) {
-    throw new NexusError(`gasMultiplier must be a finite number >= 1, got ${String(config.gasMultiplier)}`);
+  if (!Number.isFinite(gasMultiplier) || gasMultiplier < 1 || gasMultiplier > MAX_GAS_MULTIPLIER) {
+    throw new NexusError(
+      `gasMultiplier must be a finite number between 1 and ${MAX_GAS_MULTIPLIER}, got ${String(config.gasMultiplier)}`,
+    );
   }
 
   return {
@@ -103,6 +108,27 @@ export async function sendWrite<const abi extends Abi, fn extends WritableFuncti
   return ctx.confirm(hash);
 }
 
+/** A decoded log, reduced to the argument bag the callers actually read. */
+export interface DecodedEvent {
+  args: Record<string, unknown>;
+}
+
+/**
+ * Decode every occurrence of `eventName` emitted by `address` in a receipt, in log order.
+ * Logs from other contracts in the same transaction are ignored, so a counterparty contract
+ * cannot inject a look-alike event into a result this SDK reports as its own.
+ */
+export function decodeEvents<const abi extends Abi, eventName extends ContractEventName<abi>>(
+  abi: abi,
+  eventName: eventName,
+  address: Address,
+  logs: TxResult['receipt']['logs'],
+): DecodedEvent[] {
+  const wanted = address.toLowerCase();
+  const parsed = parseEventLogs({ abi, eventName, logs });
+  return parsed.filter((entry) => entry.address.toLowerCase() === wanted) as unknown as DecodedEvent[];
+}
+
 /**
  * Decode the single event named `eventName` emitted by `address` in a receipt.
  * Throws when the event is absent, which always means the ABI and the deployed
@@ -113,14 +139,12 @@ export function requireEvent<const abi extends Abi, eventName extends ContractEv
   eventName: eventName,
   address: Address,
   logs: TxResult['receipt']['logs'],
-): { args: Record<string, unknown> } {
-  const parsed = parseEventLogs({ abi, eventName, logs });
-  const wanted = address.toLowerCase();
-  const match = parsed.find((entry) => entry.address.toLowerCase() === wanted);
+): DecodedEvent {
+  const match = decodeEvents(abi, eventName, address, logs)[0];
   if (!match) {
     throw new NexusError(`Event ${String(eventName)} not found in receipt logs of ${address}`);
   }
-  return match as unknown as { args: Record<string, unknown> };
+  return match;
 }
 
 /** Read a required bigint field off a decoded event. */
@@ -128,6 +152,24 @@ export function eventBigInt(args: Record<string, unknown>, key: string): bigint 
   const value = args[key];
   if (typeof value !== 'bigint') {
     throw new NexusError(`Event field "${key}" is not a uint256`);
+  }
+  return value;
+}
+
+/** Read a required address field off a decoded event. */
+export function eventAddress(args: Record<string, unknown>, key: string): Address {
+  const value = args[key];
+  if (typeof value !== 'string' || !isAddress(value)) {
+    throw new NexusError(`Event field "${key}" is not an address`);
+  }
+  return getAddress(value);
+}
+
+/** Read a required bool field off a decoded event. */
+export function eventBoolean(args: Record<string, unknown>, key: string): boolean {
+  const value = args[key];
+  if (typeof value !== 'boolean') {
+    throw new NexusError(`Event field "${key}" is not a bool`);
   }
   return value;
 }

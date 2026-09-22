@@ -19,12 +19,21 @@ from pathlib import Path
 
 from web3 import Web3
 
-from nexusweb3 import CreateParams, JobStatus, MilestoneStatus, NexusClient, load_addresses
-from nexusweb3.contracts.erc20 import ERC20Client
+from nexusweb3 import (
+    ZERO_ADDRESS,
+    CreateParams,
+    JobStatus,
+    MilestoneStatus,
+    NexusClient,
+    format_usdc,
+    load_addresses,
+    parse_usdc,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from e2e_permit import run_permit_phase  # noqa: E402
 from e2e_support import Checks, anvil_account  # noqa: E402
+from e2e_timeouts import run_cancel_phase, run_settle_phase  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RPC_URL = os.environ.get("RPC_URL", "http://127.0.0.1:8546")
@@ -35,9 +44,16 @@ CLIENT_OPERATOR_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603
 PROVIDER_PRINCIPAL_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 PROVIDER_OPERATOR_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
 PERMIT_CLIENT_KEY = "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"
+# anvil #5: an unrelated account that settles an expired job. Holds no USDC, only gas.
+BYSTANDER_KEY = "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
 
-MILESTONE_ONE = 100_000_000  # $100 USDC (6 decimals)
-MILESTONE_TWO = 150_000_000  # $150 USDC
+# Amounts go in as USDC figures, the way every surface of the SDK takes them; the base-unit
+# twins exist only to assert against balances, which the chain reports in base units.
+MILESTONE_ONE_USDC = "100"
+MILESTONE_TWO_USDC = "150.50"
+BUDGET_USDC = "2500"
+MILESTONE_ONE = parse_usdc(MILESTONE_ONE_USDC)
+MILESTONE_TWO = parse_usdc(MILESTONE_TWO_USDC)
 JOB_TOTAL = MILESTONE_ONE + MILESTONE_TWO
 
 
@@ -48,6 +64,7 @@ def _clients(w3: Web3, addresses_path: str) -> dict[str, NexusClient]:
         "client_operator": NexusClient(w3, addresses, anvil_account(CLIENT_OPERATOR_KEY)),
         "provider_principal": NexusClient(w3, addresses, anvil_account(PROVIDER_PRINCIPAL_KEY)),
         "provider_operator": NexusClient(w3, addresses, anvil_account(PROVIDER_OPERATOR_KEY)),
+        "bystander": NexusClient(w3, addresses, anvil_account(BYSTANDER_KEY)),
     }
 
 
@@ -72,7 +89,7 @@ def _approve_usdc(checks: Checks, clients: dict[str, NexusClient]) -> None:
     escrow = clients["client_principal"].addresses.escrow
     for role in ("client_principal", "provider_principal"):
         client = clients[role]
-        client.usdc.approve(escrow, JOB_TOTAL * 10)
+        client.usdc.approve(escrow, BUDGET_USDC)
         allowance = client.usdc.allowance(client.address, escrow)
         checks.check(f"{role} approved USDC", allowance >= JOB_TOTAL, f"allowance={allowance}")
 
@@ -96,6 +113,21 @@ def _register_identities(checks: Checks, clients: dict[str, NexusClient]) -> Non
         )
 
 
+def _rename_identity(checks: Checks, clients: dict[str, NexusClient]) -> None:
+    """Take a new handle and release the old one, which becomes free for anyone else."""
+    operator = clients["client_operator"]
+    principal = clients["client_principal"].address
+    old_name = operator.identity.get_agent(principal).name
+    new_name = f"{old_name}-renamed"
+    operator.identity.rename(principal, new_name)
+    profile = operator.identity.get_agent(principal)
+    checks.check(
+        "rename takes the new name and releases the old one",
+        profile.name == new_name and operator.identity.get_agent_by_name(old_name) == ZERO_ADDRESS,
+        f"name={profile.name} oldNameOwner={operator.identity.get_agent_by_name(old_name)}",
+    )
+
+
 def _chain_now(client: NexusClient) -> int:
     """Chain time, not wall-clock time: anvil may be ahead after evm_increaseTime."""
     return int(client.w3.eth.get_block("latest")["timestamp"])
@@ -105,7 +137,7 @@ def _create_job(checks: Checks, clients: dict[str, NexusClient]) -> int:
     params = CreateParams(
         client=clients["client_principal"].address,
         provider=clients["provider_principal"].address,
-        milestone_amounts=[MILESTONE_ONE, MILESTONE_TWO],
+        milestone_amounts=[MILESTONE_ONE_USDC, MILESTONE_TWO_USDC],
         deadline=_chain_now(clients["client_operator"]) + 7 * 24 * 3600,
         terms_hash="PY_SDK_E2E_TERMS",
     )
@@ -117,13 +149,25 @@ def _create_job(checks: Checks, clients: dict[str, NexusClient]) -> int:
     job = clients["client_operator"].escrow.get_job(result.job_id)
     milestones = clients["client_operator"].escrow.get_milestones(result.job_id)
     checks.check("job status Open", job.status is JobStatus.OPEN, str(job.status))
-    checks.check("job total is $250", job.total == JOB_TOTAL, str(job.total))
+    checks.check(
+        "job total is $250.50 from USDC strings",
+        job.total == JOB_TOTAL,
+        f"{format_usdc(job.total)} USDC",
+    )
+    checks.check("a fresh job is an unaccepted offer", not job.accepted, f"acceptedAt={job.accepted_at}")
     checks.check(
         "two pending milestones",
         [m.amount for m in milestones] == [MILESTONE_ONE, MILESTONE_TWO]
         and all(m.status is MilestoneStatus.PENDING for m in milestones),
     )
     return result.job_id
+
+
+def _accept_job(checks: Checks, clients: dict[str, NexusClient], job_id: int) -> None:
+    """The provider binds itself to the offer; nothing else in the lifecycle works before this."""
+    clients["provider_operator"].escrow.accept_job(job_id)
+    job = clients["client_operator"].escrow.get_job(job_id)
+    checks.check("provider accepted the job", job.accepted, f"acceptedAt={job.accepted_at}")
 
 
 def _run_milestones(checks: Checks, clients: dict[str, NexusClient], job_id: int) -> None:
@@ -135,10 +179,19 @@ def _run_milestones(checks: Checks, clients: dict[str, NexusClient], job_id: int
         checks.check(
             f"milestone {index} submitted", submitted.status is MilestoneStatus.SUBMITTED, str(submitted.status)
         )
-        client_op.escrow.approve_milestone(job_id, index)
+        release = client_op.escrow.approve_milestone(job_id, index)
         approved = client_op.escrow.get_milestones(job_id)[index]
         checks.check(
             f"milestone {index} approved", approved.status is MilestoneStatus.APPROVED, str(approved.status)
+        )
+        # PayoutSettled proves the tokens reached the provider instead of landing in `claimable`,
+        # which a successful receipt on its own cannot distinguish.
+        provider = clients["provider_principal"].address
+        payouts = release.payouts
+        checks.check(
+            f"milestone {index} payout delivered to the provider",
+            len(payouts) == 1 and payouts[0].delivered and payouts[0].account == provider,
+            " ".join(f"{p.account}:{format_usdc(p.amount)}:{p.delivered}" for p in payouts),
         )
 
 
@@ -150,11 +203,11 @@ def _assert_settlement(
 
     job = client_op.escrow.get_job(job_id)
     checks.check("job status Completed", job.status is JobStatus.COMPLETED, str(job.status))
-    checks.check("job released equals total", job.released == JOB_TOTAL, str(job.released))
+    checks.check("job released equals total", job.released == JOB_TOTAL, format_usdc(job.released))
 
     balance = client_op.usdc.balance_of(provider)
     delta = balance - before["provider_balance"]
-    checks.check("provider received $250 USDC", delta == JOB_TOTAL, f"delta={ERC20Client.from_units(delta)}")
+    checks.check("provider received $250.50 USDC", delta == JOB_TOTAL, f"delta={format_usdc(delta)}")
 
     stats = client_op.reputation.get_stats(provider)
     positives = stats.positives - before["provider_positives"]
@@ -206,7 +259,9 @@ def main() -> int:
     _authorize_operators(checks, clients)
     _approve_usdc(checks, clients)
     _register_identities(checks, clients)
+    _rename_identity(checks, clients)
     job_id = _create_job(checks, clients)
+    _accept_job(checks, clients, job_id)
     _run_milestones(checks, clients, job_id)
     _assert_settlement(checks, clients, job_id, before)
     run_permit_phase(
@@ -218,6 +273,8 @@ def main() -> int:
         provider,
         PROVIDER_OPERATOR_KEY,
     )
+    run_settle_phase(checks, clients, provider)
+    run_cancel_phase(checks, clients, provider)
 
     return checks.summary()
 

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from web3 import Web3
 
 from ..tx import TxResult
-from ..types import CreateParams, Job, Milestone, coerce_bytes32
-from .base import ContractClient
+from ..types import CreateParams, Job, Milestone, Payout, coerce_bytes32
+from .base import Ownable2StepClient
 
 __all__ = ["EscrowClient"]
 
 
-class EscrowClient(ContractClient):
+class EscrowClient(Ownable2StepClient):
     """Client and provider may act through their principals or their operators."""
 
     # ─── Client ─────────────────────────────────────────────────────────
@@ -39,36 +41,83 @@ class EscrowClient(ContractClient):
         return self._with_job_id(result)
 
     def approve_milestone(self, job_id: int, index: int) -> TxResult:
-        """Pay the provider for milestone `index` (minus fee) and advance the job."""
-        return self._send("approveMilestone", int(job_id), int(index))
+        """Pay the provider for milestone `index` (minus fee) and advance the job.
+
+        The returned :class:`TxResult` carries `payouts` decoded from `PayoutSettled`.
+        """
+        return self._with_payouts(self._send("approveMilestone", int(job_id), int(index)))
 
     def reject_milestone(self, job_id: int, index: int, reason_hash: str | bytes | None = None) -> TxResult:
+        """Send a Submitted milestone back, inside `REVIEW_WINDOW` and at most `MAX_REJECTIONS` times."""
         return self._send("rejectMilestone", int(job_id), int(index), coerce_bytes32(reason_hash))
 
     def cancel_job(self, job_id: int) -> TxResult:
-        return self._send("cancelJob", int(job_id))
+        """Full refund. Allowed before acceptance, and after it only while nothing was ever submitted.
+
+        The returned :class:`TxResult` carries `payouts` decoded from `PayoutSettled`.
+        """
+        return self._with_payouts(self._send("cancelJob", int(job_id)))
 
     # ─── Provider ───────────────────────────────────────────────────────
+    def accept_job(self, job_id: int) -> TxResult:
+        """Bind the provider to the offer.
+
+        A created job is only an offer: `submit_milestone`, `approve_milestone` and `dispute` all
+        revert with `NotAccepted` until this lands, and the client may cancel for a full refund.
+        Must happen before the job deadline, and only once (`AlreadyAccepted` afterwards).
+        """
+        return self._send("acceptJob", int(job_id))
+
     def submit_milestone(self, job_id: int, index: int, deliverable_hash: str | bytes) -> TxResult:
         return self._send("submitMilestone", int(job_id), int(index), coerce_bytes32(deliverable_hash))
 
     def claim_approval(self, job_id: int, index: int) -> TxResult:
-        """Provider self-approval of a milestone the client left Submitted past `REVIEW_WINDOW`."""
-        return self._send("claimApproval", int(job_id), int(index))
+        """Provider self-approval of a milestone the client left Submitted past `REVIEW_WINDOW`.
+
+        The returned :class:`TxResult` carries `payouts` decoded from `PayoutSettled`.
+        """
+        return self._with_payouts(self._send("claimApproval", int(job_id), int(index)))
 
     # ─── Either party / arbiter / anyone ────────────────────────────────
     def dispute(self, job_id: int, reason_hash: str | bytes | None = None) -> TxResult:
         return self._send("dispute", int(job_id), coerce_bytes32(reason_hash))
 
     def resolve(self, job_id: int, provider_bps: int) -> TxResult:
-        """Arbiter only: split the remaining funds, `provider_bps` out of 10_000 to the provider."""
-        return self._send("resolve", int(job_id), int(provider_bps))
+        """Arbiter only: split the remaining funds, `provider_bps` out of 10_000 to the provider.
 
-    def refund_expired(self, job_id: int) -> TxResult:
-        return self._send("refundExpired", int(job_id))
+        The returned :class:`TxResult` carries `payouts` decoded from `PayoutSettled`.
+        """
+        return self._with_payouts(self._send("resolve", int(job_id), int(provider_bps)))
 
-    def withdraw_claimable(self) -> TxResult:
-        return self._send("withdrawClaimable")
+    def settle_expired(self, job_id: int) -> TxResult:
+        """Anyone: close out a job time has decided.
+
+        Open jobs qualify past `expiry_of`, Disputed ones `DISPUTE_GRACE` after `disputed_at`.
+        Every Submitted milestone vests to the provider and every Pending one refunds the client,
+        so client silence no longer claws back delivered work. The returned :class:`TxResult`
+        carries `to_provider` and `to_client` decoded from `JobExpired`, plus `payouts`.
+        """
+        result = self._with_payouts(self._send("settleExpired", int(job_id)))
+        args = self._event_args("JobExpired", result.receipt)
+        if not args:
+            return result
+        return replace(
+            result, to_provider=int(args[0]["toProvider"]), to_client=int(args[0]["toClient"])
+        )
+
+    def withdraw_claimable(self, account: str, to: str) -> TxResult:
+        """Sweep funds parked for `account` after a failed payout into `to`.
+
+        Signed by `account` itself or one of its operators; `to` must not be the zero address.
+        The returned :class:`TxResult` carries `withdrawn` decoded from `ClaimableWithdrawn`.
+        """
+        result = self._send(
+            "withdrawClaimable", Web3.to_checksum_address(account), Web3.to_checksum_address(to)
+        )
+        args = self._event_args("ClaimableWithdrawn", result.receipt)
+        if not args:
+            return result
+        return replace(result, withdrawn=int(args[0]["amount"]))
 
     # ─── Views ──────────────────────────────────────────────────────────
     def get_job(self, job_id: int) -> Job:
@@ -88,12 +137,32 @@ class EscrowClient(ContractClient):
         return int(self._call("jobCount"))
 
     def expiry_of(self, job_id: int) -> int:
-        """Effective expiry: `max(deadline, latest submission + REVIEW_WINDOW)`."""
+        """Effective expiry: `max(deadline, latest submission + REVIEW_WINDOW)`.
+
+        The moment an Open job becomes settleable with :meth:`settle_expired`, and the moment
+        `dispute` stops working.
+        """
         return int(self._call("expiryOf", int(job_id)))
 
     def review_window(self) -> int:
         """Seconds a client may leave a submitted milestone unreviewed before the provider can claim."""
         return int(self._call("REVIEW_WINDOW"))
+
+    def dispute_grace(self) -> int:
+        """Seconds a Disputed job waits for its arbiter before anyone may :meth:`settle_expired` it."""
+        return int(self._call("DISPUTE_GRACE"))
+
+    def max_rejections(self) -> int:
+        """Rejections one milestone tolerates before resubmission reverts with `TooManyRejections`."""
+        return int(self._call("MAX_REJECTIONS"))
+
+    def max_reputation_per_pair(self) -> int:
+        """Reputation entries a single client/provider pair may generate, so a pair cannot farm score."""
+        return int(self._call("MAX_REPUTATION_PER_PAIR"))
+
+    def min_reputation_value(self) -> int:
+        """Settlement value below which no reputation is written, so dust jobs cannot farm score."""
+        return int(self._call("MIN_REPUTATION_VALUE"))
 
     def claimable(self, account: str) -> int:
         return int(self._call("claimable", Web3.to_checksum_address(account)))
@@ -128,6 +197,17 @@ class EscrowClient(ContractClient):
             Web3.to_checksum_address(kill_switch),
             Web3.to_checksum_address(fee_router),
         )
+
+    def _with_payouts(self, result: TxResult) -> TxResult:
+        """Attach every `PayoutSettled` this transaction emitted, in log order.
+
+        The event fires for a delivered transfer and for one that bounced into `claimable` alike,
+        so a caller can see where the money actually went without a second round trip.
+        """
+        payouts = tuple(
+            Payout.from_args(args) for args in self._event_args("PayoutSettled", result.receipt)
+        )
+        return replace(result, payouts=payouts)
 
     def _with_job_id(self, result: TxResult) -> TxResult:
         job_id = self._first_event_arg("JobCreated", result.receipt, "jobId")

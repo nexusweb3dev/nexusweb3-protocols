@@ -79,6 +79,21 @@ ERC20_ABI: ABI = [
     },
     {
         "type": "function",
+        "name": "eip712Domain",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [
+            {"name": "fields", "type": "bytes1"},
+            {"name": "name", "type": "string"},
+            {"name": "version", "type": "string"},
+            {"name": "chainId", "type": "uint256"},
+            {"name": "verifyingContract", "type": "address"},
+            {"name": "salt", "type": "bytes32"},
+            {"name": "extensions", "type": "uint256[]"},
+        ],
+    },
+    {
+        "type": "function",
         "name": "approve",
         "stateMutability": "nonpayable",
         "inputs": [{"name": "spender", "type": "address"}, {"name": "value", "type": "uint256"}],

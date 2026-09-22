@@ -10,9 +10,18 @@ export interface AccessModule {
   /** Principal authorizes a hot operator key until `expiry` (unix seconds, default {@link NO_EXPIRY}). */
   authorizeOperator(operator: Address, expiry?: number): Promise<TxResult>;
   revokeOperator(operator: Address): Promise<TxResult>;
+  /**
+   * Signed by the operator itself: give up its own authorization for `agent`. Lets a hot key that
+   * may have leaked cut itself off without waiting for the principal to act.
+   */
+  renounceOperator(agent: Address): Promise<TxResult>;
   /** True when `caller` is `agent` itself or one of its unexpired operators. */
   isOperatorFor(agent: Address, caller: Address): Promise<boolean>;
-  /** 0 when `operator` is not authorized for `agent`. */
+  /**
+   * Unix second at which `operator`'s authorization for `agent` lapses, or 0 when there is no
+   * live authorization — never granted, revoked, renounced, or simply expired. A non-zero value
+   * is therefore always in the future, so this and {@link AccessModule.isOperatorFor} agree.
+   */
   operatorExpiry(agent: Address, operator: Address): Promise<number>;
 }
 
@@ -26,6 +35,9 @@ export function createAccessModule(ctx: Context): AccessModule {
     },
     async revokeOperator(operator) {
       return sendWrite(ctx, address, AgentAccessAbi, 'revokeOperator', [operator]);
+    },
+    async renounceOperator(agent) {
+      return sendWrite(ctx, address, AgentAccessAbi, 'renounceOperator', [agent]);
     },
     isOperatorFor: (agent, caller) => reader.read.isOperatorFor([agent, caller]),
     operatorExpiry: (agent, operator) => reader.read.operatorExpiry([agent, operator]),

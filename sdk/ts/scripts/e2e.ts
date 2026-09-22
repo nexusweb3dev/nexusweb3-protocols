@@ -17,16 +17,18 @@ import {
   createWalletClient,
   http,
   keccak256,
-  parseUnits,
   stringToHex,
+  zeroAddress,
   type Address,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { foundry } from 'viem/chains';
 import { loadAddresses } from '../src/addresses.js';
+import { formatUsdc, parseUsdc } from '../src/amount.js';
 import { createNexusClient, type NexusClient } from '../src/client.js';
 import { TIERS, type NexusPublicClient, type NexusWalletClient } from '../src/types.js';
 import { runPermitLeg } from './permit-leg.js';
+import { runCancelLeg, runSettleLeg } from './timeout-legs.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sdkRoot = resolve(here, '..');
@@ -44,6 +46,8 @@ const KEYS = {
   providerPrincipal: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
   providerOperator: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
   permitPrincipal: '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a',
+  /** anvil #5: settles an expired job as an unrelated third party. */
+  bystander: '0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba',
 } as const;
 
 const results: Array<{ name: string; ok: boolean; detail: string }> = [];
@@ -64,6 +68,7 @@ const accounts = {
   providerPrincipal: privateKeyToAccount(KEYS.providerPrincipal),
   providerOperator: privateKeyToAccount(KEYS.providerOperator),
   permitPrincipal: privateKeyToAccount(KEYS.permitPrincipal),
+  bystander: privateKeyToAccount(KEYS.bystander),
 };
 
 const addresses = loadAddresses(JSON.parse(readFileSync(addressesPath, 'utf8')));
@@ -104,13 +109,14 @@ async function main(): Promise<void> {
   );
 
   step('principals approve USDC to the escrow');
-  const budget = parseUnits('10000', 6);
+  // Amounts go in as USDC figures; balances come back in base units, which is what the chain stores.
+  const budget = '10000';
   await clientPrincipal.usdc.approve(addresses.escrow, budget);
   await providerPrincipal.usdc.approve(addresses.escrow, budget);
   check(
     'usdc approved',
-    (await clientPrincipal.usdc.allowance(clientAddress, addresses.escrow)) >= budget,
-    `${budget} base units`,
+    (await clientPrincipal.usdc.allowance(clientAddress, addresses.escrow)) >= parseUsdc(budget),
+    `${budget} USDC`,
   );
 
   step('operators register the principals in AgentIdentityV2');
@@ -123,9 +129,21 @@ async function main(): Promise<void> {
     `provider name=${providerProfile.name}`,
   );
 
-  step('client operator creates a 2-milestone job ($100 + $150)');
-  const milestones = [parseUnits('100', 6), parseUnits('150', 6)] as const;
-  const total = milestones[0] + milestones[1];
+  step('client operator renames the client identity, freeing the old handle');
+  const oldName = (await clientOperator.identity.getAgent(clientAddress)).name;
+  const newName = `${oldName}-renamed`;
+  await clientOperator.identity.rename(clientAddress, newName);
+  const renamed = await clientOperator.identity.getAgent(clientAddress);
+  const freed = await clientOperator.identity.getAgentByName(oldName);
+  check(
+    'rename takes the new name and releases the old one',
+    renamed.name === newName && freed === zeroAddress,
+    `name=${renamed.name} oldNameOwner=${freed}`,
+  );
+
+  step('client operator creates a 2-milestone job ($100 + $150.50)');
+  const milestones = ['100', '150.50'] as const;
+  const total = parseUsdc(milestones[0]) + parseUsdc(milestones[1]);
   const block = await publicClient.getBlock();
   // Baselines, so the script is also correct against a chain that already has history.
   const providerBefore = await providerOperator.usdc.balanceOf(providerAddress);
@@ -140,6 +158,16 @@ async function main(): Promise<void> {
   });
   check('job created', created.jobId >= 0n, `jobId=${created.jobId} tx=${created.hash}`);
 
+  step('provider operator accepts the offer, binding the provider to it');
+  const beforeAccept = await clientOperator.escrow.getJob(created.jobId);
+  await providerOperator.escrow.acceptJob(created.jobId);
+  const accepted = await clientOperator.escrow.getJob(created.jobId);
+  check(
+    'acceptJob records acceptedAt',
+    beforeAccept.acceptedAt === 0 && accepted.acceptedAt > 0,
+    `before=${beforeAccept.acceptedAt} after=${accepted.acceptedAt}`,
+  );
+
   step('provider submits and client approves both milestones');
   for (const index of [0, 1] as const) {
     await providerOperator.escrow.submitMilestone(
@@ -149,9 +177,22 @@ async function main(): Promise<void> {
     );
     const submitted = await providerOperator.escrow.getMilestones(created.jobId);
     check(`milestone ${index} submitted`, submitted[index]?.status === 'Submitted', `status=${submitted[index]?.status}`);
-    await clientOperator.escrow.approveMilestone(created.jobId, index);
+    const release = await clientOperator.escrow.approveMilestone(created.jobId, index);
     const approved = await clientOperator.escrow.getMilestones(created.jobId);
     check(`milestone ${index} approved`, approved[index]?.status === 'Approved', `status=${approved[index]?.status}`);
+    // PayoutSettled proves the money actually reached the provider rather than landing in
+    // `claimable`, which a successful receipt alone cannot tell you.
+    const payout = release.payouts[0];
+    check(
+      `milestone ${index} payout delivered to the provider`,
+      release.payouts.length === 1 &&
+        payout !== undefined &&
+        payout.delivered === true &&
+        payout.account === providerAddress,
+      `payouts=${release.payouts
+        .map((entry) => `${entry.account}:${formatUsdc(entry.amount)}:${entry.delivered}`)
+        .join(' ')}`,
+    );
   }
 
   step('assert settlement, reputation and audit log');
@@ -160,9 +201,9 @@ async function main(): Promise<void> {
 
   const providerAfter = await providerOperator.usdc.balanceOf(providerAddress);
   check(
-    'provider paid 250 USDC',
+    'provider paid 250.50 USDC',
     providerAfter - providerBefore === total,
-    `delta=${providerAfter - providerBefore} expected=${total}`,
+    `delta=${formatUsdc(providerAfter - providerBefore)} expected=${formatUsdc(total)}`,
   );
 
   const stats = await providerOperator.reputation.getStats(providerAddress);
@@ -219,6 +260,7 @@ async function main(): Promise<void> {
 
   step('provider claims a milestone the client ignored for 8 days');
   const permitProvider = providerOperator;
+  await permitProvider.escrow.acceptJob(permit.jobId);
   const tokensBefore = await permitProvider.usdc.balanceOf(providerAddress);
   await permitProvider.escrow.submitMilestone(
     permit.jobId,
@@ -247,6 +289,24 @@ async function main(): Promise<void> {
     `delta=${tokensAfter - tokensBefore} expected=${permit.total}`,
   );
   check('claimed job is Completed', claimed.status === 'Completed', `status=${claimed.status}`);
+
+  const timeoutLegs = {
+    publicClient,
+    clientOperator,
+    providerOperator,
+    bystander: nexus(accounts.bystander),
+    clientAddress,
+    providerAddress,
+    testClient,
+    check,
+    suffix,
+  };
+
+  step('client goes silent after a submission: a bystander settles the expired job');
+  await runSettleLeg(timeoutLegs);
+
+  step('client cancels an offer the provider never accepted: full refund');
+  await runCancelLeg(timeoutLegs);
 }
 
 main()

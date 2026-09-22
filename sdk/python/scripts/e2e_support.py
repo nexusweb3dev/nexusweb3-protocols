@@ -55,6 +55,12 @@ def anvil_account(private_key: str) -> LocalAccount:
     return Account.from_key(private_key)
 
 
+def advance_time(w3: Web3, seconds: int) -> None:
+    """Move the anvil clock forward and mine a block so the new timestamp takes effect."""
+    w3.provider.make_request("evm_increaseTime", [seconds])
+    w3.provider.make_request("evm_mine", [])
+
+
 def load_forge_artifact(contract: str) -> tuple[list[dict[str, Any]], str]:
     """Return `(abi, bytecode)` for a contract built by the repo's `forge build`."""
     path = FORGE_OUT / f"{contract}.sol" / f"{contract}.json"

@@ -14,7 +14,7 @@ from ..errors import ContractRevert
 from ..revert import build_error_index, decode_revert
 from ..tx import TxResult, TxSender
 
-__all__ = ["ContractClient"]
+__all__ = ["ContractClient", "Ownable2StepClient"]
 
 
 class ContractClient:
@@ -76,3 +76,27 @@ class ContractClient:
     @staticmethod
     def _tuples(values: Sequence[Any]) -> list[Any]:
         return list(values)
+
+
+class Ownable2StepClient(ContractClient):
+    """Governance surface shared by every v2 contract.
+
+    Ownership moves in two steps: the current owner proposes with :meth:`transfer_ownership`,
+    and nothing changes until the proposed address calls :meth:`accept_ownership` itself. A
+    handover to a wrong or unreachable address is therefore recoverable — propose again.
+    """
+
+    def owner(self) -> str:
+        return str(self._call("owner"))
+
+    def pending_owner(self) -> str:
+        """Address that may call :meth:`accept_ownership`; the zero address when none is proposed."""
+        return str(self._call("pendingOwner"))
+
+    def transfer_ownership(self, new_owner: str) -> TxResult:
+        """Owner only: propose `new_owner`. Ownership stays put until that address accepts."""
+        return self._send("transferOwnership", Web3.to_checksum_address(new_owner))
+
+    def accept_ownership(self) -> TxResult:
+        """Signed by the pending owner: take ownership of the contract."""
+        return self._send("acceptOwnership")

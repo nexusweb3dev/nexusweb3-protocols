@@ -12,6 +12,7 @@ from web3.contract.contract import ContractFunction
 from web3.exceptions import Web3Exception
 
 from .errors import MissingSignerError, TransactionFailed
+from .types import Payout
 
 logger = logging.getLogger("nexusweb3")
 
@@ -30,12 +31,23 @@ __all__ = ["TxResult", "TxSender", "GAS_BUFFER_NUMERATOR", "GAS_BUFFER_DENOMINAT
 
 @dataclass(frozen=True)
 class TxResult:
-    """Outcome of a successful write."""
+    """Outcome of a successful write.
+
+    The optional fields are filled in by the sub-client that knows which event the call emits:
+    `job_id` from `JobCreated`, `log_id` from `ActionLogged`, `to_provider` / `to_client` from
+    `JobExpired`, `withdrawn` from `ClaimableWithdrawn` and `payouts` from every `PayoutSettled`.
+    """
 
     hash: str
     receipt: Any = field(repr=False)
     job_id: Optional[int] = None
     log_id: Optional[int] = None
+    to_provider: Optional[int] = None
+    to_client: Optional[int] = None
+    withdrawn: Optional[int] = None
+    #: Every payout the escrow attempted in this transaction, in emission order. Empty for calls
+    #: that move no money, and for every contract other than the escrow.
+    payouts: tuple[Payout, ...] = ()
 
     @property
     def block_number(self) -> int:

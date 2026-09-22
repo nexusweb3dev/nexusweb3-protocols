@@ -7,6 +7,7 @@ import {
   type TypedDataDomain,
 } from 'viem';
 import { erc20Abi } from './abis/erc20.js';
+import { toBaseUnits, type UsdcAmount } from './amount.js';
 import { NexusError, type NexusPublicClient, type NexusWalletClient, type PermitSignature } from './types.js';
 
 /** EIP-2612 `Permit` type, identical for every compliant token. */
@@ -22,6 +23,47 @@ export const PERMIT_TYPES = {
 
 /** USDC (Base and every Circle deployment) signs its permits with EIP-712 version "2". */
 export const USDC_EIP712_VERSION = '2';
+
+/** Version every other EIP-2612 token uses, OpenZeppelin's ERC20Permit included. */
+export const DEFAULT_EIP712_VERSION = '1';
+
+/**
+ * Tokens whose domain version cannot be discovered on chain, keyed by checksummed address.
+ * Only for deployments that lack ERC-5267 — anything implementing it is read, not looked up.
+ */
+export const KNOWN_EIP712_VERSIONS: Readonly<Record<Address, string>> = {
+  '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913': USDC_EIP712_VERSION, // USDC, Base mainnet
+  '0x036CbD53842c5426634e7929541eC2318f3dCF7e': USDC_EIP712_VERSION, // USDC, Base Sepolia
+};
+
+// Looked up case-insensitively: a caller's address casing must never decide a signature's fate.
+const KNOWN_BY_LOWERCASE = new Map(
+  Object.entries(KNOWN_EIP712_VERSIONS).map(([address, version]) => [address.toLowerCase(), version]),
+);
+
+/**
+ * Work out the EIP-712 domain version `token` signs permits with.
+ *
+ * Signing under the wrong version produces a signature the token silently rejects, so this
+ * prefers on-chain truth: ERC-5267 `eip712Domain()` when the token implements it, then the table
+ * of known deployments that do not, and finally {@link DEFAULT_EIP712_VERSION}.
+ */
+export async function resolveEip712Version(
+  publicClient: NexusPublicClient,
+  token: Address,
+): Promise<string> {
+  try {
+    const domain = await publicClient.readContract({
+      address: token,
+      abi: erc20Abi,
+      functionName: 'eip712Domain',
+    });
+    if (domain[2]) return domain[2];
+  } catch {
+    // Not ERC-5267: the call reverts or returns nothing decodable. Fall through to the table.
+  }
+  return KNOWN_BY_LOWERCASE.get(token.toLowerCase()) ?? DEFAULT_EIP712_VERSION;
+}
 
 export interface PermitMessage {
   owner: Address;
@@ -61,12 +103,13 @@ export interface SignPermitParams {
   token: Address;
   owner: Address;
   spender: Address;
-  value: bigint;
+  /** Human USDC (`'250.00'`), or a bigint when you already hold base units. */
+  value: UsdcAmount;
   /** Unix seconds. */
   deadline: bigint;
   /** Public client for the `name()` / `nonces()` reads. Derived from the wallet transport when omitted. */
   publicClient?: NexusPublicClient;
-  /** EIP-712 domain version. Defaults to "2" (USDC); OpenZeppelin ERC20Permit tokens use "1". */
+  /** EIP-712 domain version. Discovered by {@link resolveEip712Version} when omitted. */
   version?: string;
 }
 
@@ -85,13 +128,15 @@ function publicClientFrom(walletClient: NexusWalletClient): NexusPublicClient {
 }
 
 /**
- * Sign an EIP-2612 permit for `value` of `token`, ready for
- * `escrow.createJobWithPermit`. Reads `name()`/`nonces()` from the token and the
- * chain id from the client; the domain version falls back to the token's own
- * ERC-5267 `eip712Domain()` when it exposes one.
+ * Sign an EIP-2612 permit for `value` of `token`, ready for `escrow.createJobWithPermit`.
+ *
+ * `value` is a human USDC amount (`'250.00'`); pass a bigint only when you already hold base
+ * units. Reads `name()`/`nonces()` from the token and the chain id from the client, and discovers
+ * the domain version with {@link resolveEip712Version} unless one is given.
  */
 export async function signPermit(params: SignPermitParams): Promise<SignedPermit> {
-  const { walletClient, token, owner, spender, value, deadline } = params;
+  const { walletClient, token, owner, spender, deadline } = params;
+  const value = toBaseUnits(params.value, 'value');
   const publicClient = params.publicClient ?? publicClientFrom(walletClient);
   const chainId = walletClient.chain?.id ?? (await publicClient.getChainId());
 
@@ -100,19 +145,7 @@ export async function signPermit(params: SignPermitParams): Promise<SignedPermit
     publicClient.readContract({ address: token, abi: erc20Abi, functionName: 'nonces', args: [owner] }),
   ]);
 
-  let version = params.version;
-  if (version === undefined) {
-    try {
-      const domain = await publicClient.readContract({
-        address: token,
-        abi: erc20Abi,
-        functionName: 'eip712Domain',
-      });
-      version = domain[2];
-    } catch {
-      version = USDC_EIP712_VERSION;
-    }
-  }
+  const version = params.version ?? (await resolveEip712Version(publicClient, token));
 
   const typedData = buildPermitTypedData({
     name,

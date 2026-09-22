@@ -47,6 +47,7 @@ interface IAgentAuditLogV2 {
 
     function getLog(uint256 logId) external view returns (ActionLog memory);
     function getLogCount(address agent) external view returns (uint256);
+    /// @notice Page of `agent`'s entries; `limit` is clipped to at most 200 entries.
     function getAgentLogs(address agent, uint256 offset, uint256 limit) external view returns (ActionLog[] memory);
     function totalLogs() external view returns (uint256);
     function isAuthorizedProtocol(address protocol) external view returns (bool);

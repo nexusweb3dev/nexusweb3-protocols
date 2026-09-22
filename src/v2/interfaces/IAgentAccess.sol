@@ -8,6 +8,7 @@ pragma solidity ^0.8.24;
 interface IAgentAccess {
     event OperatorAuthorized(address indexed agent, address indexed operator, uint48 expiry);
     event OperatorRevoked(address indexed agent, address indexed operator);
+    event OperatorRenounced(address indexed agent, address indexed operator);
 
     error ZeroAddress();
     error SelfOperator();
@@ -21,9 +22,12 @@ interface IAgentAccess {
     /// @notice Revoke an operator immediately.
     function revokeOperator(address operator) external;
 
+    /// @notice An operator gives up its own authorization for `agent` (e.g. after a suspected leak).
+    function renounceOperator(address agent) external;
+
     /// @notice True if `caller` is `agent` itself or a currently valid operator for `agent`.
     function isOperatorFor(address agent, address caller) external view returns (bool);
 
-    /// @notice Expiry timestamp of an operator authorization (0 = not authorized).
+    /// @notice Expiry timestamp of a live operator authorization (0 = not authorized or lapsed).
     function operatorExpiry(address agent, address operator) external view returns (uint48);
 }

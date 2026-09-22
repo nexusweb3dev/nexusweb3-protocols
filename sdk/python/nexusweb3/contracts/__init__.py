@@ -2,7 +2,7 @@
 
 from .access import AccessClient
 from .audit_log import AuditLogClient
-from .base import ContractClient
+from .base import ContractClient, Ownable2StepClient
 from .erc20 import ERC20Client
 from .escrow import EscrowClient
 from .fee_router import FeeRouterClient
@@ -19,5 +19,6 @@ __all__ = [
     "FeeRouterClient",
     "IdentityClient",
     "KillSwitchClient",
+    "Ownable2StepClient",
     "ReputationClient",
 ]

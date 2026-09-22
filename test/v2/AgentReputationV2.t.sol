@@ -403,4 +403,63 @@ contract AgentReputationV2Test is Test {
         vm.expectRevert(abi.encodeWithSelector(IAgentReputationV2.NotAuthorizedProtocol.selector, caller));
         rep.recordInteraction(agent1, true, 0, 0);
     }
+
+    // ─── H-02: two-step ownership ───────────────────────────────────────
+
+    /// @notice H-02: `transferOwnership` only proposes. A mistyped owner cannot brick the contract
+    ///         because the current owner keeps every power until the new one accepts.
+    function test_H02_transferOwnershipOnlyProposes() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        rep.transferOwnership(newOwner);
+
+        assertEq(rep.owner(), owner);
+        assertEq(rep.pendingOwner(), newOwner);
+    }
+
+    /// @notice H-02: ownership moves only once the proposed owner accepts.
+    function test_H02_acceptOwnershipCompletesTransfer() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        rep.transferOwnership(newOwner);
+
+        vm.prank(newOwner);
+        rep.acceptOwnership();
+
+        assertEq(rep.owner(), newOwner);
+        assertEq(rep.pendingOwner(), address(0));
+    }
+
+    /// @notice H-02: nobody but the proposed owner can accept.
+    function test_H02_revert_acceptOwnershipByStranger() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        rep.transferOwnership(newOwner);
+
+        vm.prank(external_);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, external_));
+        rep.acceptOwnership();
+
+        assertEq(rep.owner(), owner);
+    }
+
+    /// @notice H-02: a typo'd proposal is recoverable — the real owner just re-proposes.
+    function test_H02_pendingOwnerCanBeReplacedBeforeAcceptance() public {
+        address typo = makeAddr("typo");
+        address newOwner = makeAddr("newOwner");
+
+        vm.startPrank(owner);
+        rep.transferOwnership(typo);
+        rep.transferOwnership(newOwner);
+        vm.stopPrank();
+
+        assertEq(rep.pendingOwner(), newOwner);
+
+        vm.prank(typo);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, typo));
+        rep.acceptOwnership();
+    }
 }

@@ -5,13 +5,17 @@ from __future__ import annotations
 from web3 import Web3
 
 from ..tx import TxResult
-from .base import ContractClient
+from .base import Ownable2StepClient
 
 __all__ = ["FeeRouterClient"]
 
 
-class FeeRouterClient(ContractClient):
-    """Fees are transferred to the router, then `route` splits them referral/staking/treasury."""
+class FeeRouterClient(Ownable2StepClient):
+    """Fees are transferred to the router, then `route` splits them referral/staking/treasury.
+
+    A referral sink that reverts does not fail the routing: the router emits `ReferralCallFailed`
+    with the agent and the amount, and pays the whole fee to staking and treasury instead.
+    """
 
     def route(self, agent: str, amount: int) -> TxResult:
         """Authorized protocols only: distribute `amount` already held by the router."""

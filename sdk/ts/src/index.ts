@@ -1,5 +1,7 @@
 export { BASE_ERC8004_IDENTITY_REGISTRY, loadAddresses, readChainId } from './addresses.js';
 export type { Addresses, DeploymentJson } from './addresses.js';
+export { formatUsdc, parseUsdc, toBaseUnits, USDC_DECIMALS } from './amount.js';
+export type { UsdcAmount } from './amount.js';
 export { createNexusClient } from './client.js';
 export type { NexusClient } from './client.js';
 export type { NexusClientConfig } from './internal.js';
@@ -13,7 +15,10 @@ export type { ReputationModule } from './modules/reputation.js';
 export type { UsdcModule } from './modules/usdc.js';
 export {
   buildPermitTypedData,
+  DEFAULT_EIP712_VERSION,
+  KNOWN_EIP712_VERSIONS,
   PERMIT_TYPES,
+  resolveEip712Version,
   signPermit,
   USDC_EIP712_VERSION,
 } from './permit.js';
@@ -48,10 +53,14 @@ export type {
   MilestoneStatus,
   NexusPublicClient,
   NexusWalletClient,
+  Payout,
   PermitSignature,
   ReputationStats,
+  SettlementResult,
+  SettleExpiredResult,
   Tier,
   TxResult,
+  WithdrawClaimableResult,
 } from './types.js';
 export {
   AgentAccessAbi,

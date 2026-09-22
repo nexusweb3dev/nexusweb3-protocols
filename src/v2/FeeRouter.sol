@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IFeeRouter} from "./interfaces/IFeeRouter.sol";
 
@@ -15,9 +16,10 @@ interface IReferralSink {
 /// @title FeeRouter
 /// @notice Single sink for protocol fees. Authorized protocols transfer the fee token to this
 ///         contract and call `route`. The router first offers the fee to the referral contract
-///         (which pulls the referrer's share), then splits the remainder between the staking
-///         recipient and the treasury. Treasury absorbs rounding dust.
-contract FeeRouter is Ownable, ReentrancyGuard, IFeeRouter {
+///         (which pulls the referrer's share under an allowance bounded to that one fee), then
+///         splits the remainder between the staking recipient and the treasury. Treasury absorbs
+///         rounding dust.
+contract FeeRouter is Ownable2Step, ReentrancyGuard, IFeeRouter {
     using SafeERC20 for IERC20;
     /// @notice Basis-point denominator (100%).
     uint16 public constant BPS = 10_000;
@@ -60,10 +62,6 @@ contract FeeRouter is Ownable, ReentrancyGuard, IFeeRouter {
         _referral = referral_;
         _stakingBps = stakingBps_;
         _treasuryBps = treasuryBps_;
-
-        if (referral_ != address(0)) {
-            SafeERC20.forceApprove(paymentToken_, referral_, type(uint256).max);
-        }
     }
 
     // ─── Routing ────────────────────────────────────────────────────────
@@ -72,6 +70,9 @@ contract FeeRouter is Ownable, ReentrancyGuard, IFeeRouter {
     /// @dev A reverting or misbehaving referral contract must never block fee routing, so the
     ///      referral call is wrapped in try/catch and the amount it pulled is measured from the
     ///      router's own balance delta (clamped to `amount` so an over-pull cannot underflow).
+    ///      The referral is approved for exactly `amount` immediately before the call and the
+    ///      allowance is zeroed immediately after, so it can never reach fees held for other
+    ///      routings or a surplus balance parked in the router.
     function route(address agent, uint256 amount) external nonReentrant {
         if (!_authorizedProtocol[msg.sender]) revert NotAuthorizedProtocol(msg.sender);
         if (amount == 0) revert ZeroAmount();
@@ -83,7 +84,13 @@ contract FeeRouter is Ownable, ReentrancyGuard, IFeeRouter {
         uint256 referralPaid;
         address referral_ = _referral;
         if (referral_ != address(0)) {
-            try IReferralSink(referral_).recordFee(agent, amount, address(token)) {} catch {}
+            SafeERC20.forceApprove(token, referral_, amount);
+            try IReferralSink(referral_).recordFee(agent, amount, address(token)) {
+                SafeERC20.forceApprove(token, referral_, 0);
+            } catch {
+                SafeERC20.forceApprove(token, referral_, 0);
+                emit ReferralCallFailed(agent, amount);
+            }
             uint256 balanceAfter = token.balanceOf(address(this));
             referralPaid = balanceBefore > balanceAfter ? balanceBefore - balanceAfter : 0;
             if (referralPaid > amount) referralPaid = amount;
@@ -119,14 +126,12 @@ contract FeeRouter is Ownable, ReentrancyGuard, IFeeRouter {
 
     /// @inheritdoc IFeeRouter
     /// @dev Pass the zero address to disable referral payouts. The outgoing referral contract's
-    ///      allowance is always revoked before the new one is granted.
+    ///      allowance is revoked here; the incoming one is granted per routing, bounded to that fee.
     function setReferral(address referral_) external onlyOwner {
-        IERC20 token = _paymentToken;
         address previous = _referral;
-        if (previous != address(0)) SafeERC20.forceApprove(token, previous, 0);
+        if (previous != address(0)) SafeERC20.forceApprove(_paymentToken, previous, 0);
 
         _referral = referral_;
-        if (referral_ != address(0)) SafeERC20.forceApprove(token, referral_, type(uint256).max);
 
         emit ReferralUpdated(referral_);
     }
