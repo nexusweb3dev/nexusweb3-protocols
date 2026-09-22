@@ -36,8 +36,10 @@ __all__ = [
     "escrow_withdraw",
     "identity_get",
     "identity_register",
+    "identity_rename",
     "killswitch_status",
     "log_dict",
+    "payout_list",
     "UNLIMITED",
     "parse_amounts",
     "principal",
@@ -71,6 +73,19 @@ def identity_register(client: NexusClient, args: argparse.Namespace) -> Any:
     return {"tx": result.hash, "agent": agent, "profile": client.identity.get_agent(agent)}
 
 
+def identity_rename(client: NexusClient, args: argparse.Namespace) -> Any:
+    agent = principal(client, args)
+    old_name = client.identity.get_agent(agent).name
+    result = client.identity.rename(agent, args.name)
+    return {
+        "tx": result.hash,
+        "agent": agent,
+        "oldName": old_name,
+        "newName": args.name,
+        "profile": client.identity.get_agent(agent),
+    }
+
+
 def identity_get(client: NexusClient, args: argparse.Namespace) -> Any:
     agent = principal(client, args)
     return {
@@ -90,6 +105,22 @@ def reputation_get(client: NexusClient, args: argparse.Namespace) -> Any:
         "tier": client.reputation.get_tier(agent),
         "stats": {**to_jsonable(stats), "volume_usdc": format_usdc(stats.volume_usdc)},
     }
+
+
+def payout_list(result: Any) -> list[dict[str, Any]]:
+    """Render `TxResult.payouts` for CLI output, amounts in USDC.
+
+    `delivered: false` is not a failed call — the transfer bounced and the amount is now parked as
+    claimable for that account, recoverable with `escrow withdraw`.
+    """
+    return [
+        {
+            "account": payout.account,
+            "amountUsdc": format_usdc(payout.amount),
+            "delivered": payout.delivered,
+        }
+        for payout in result.payouts
+    ]
 
 
 def chain_now(client: NexusClient) -> int:
@@ -132,6 +163,7 @@ def escrow_settle(client: NexusClient, args: argparse.Namespace) -> Any:
         "jobId": args.job_id,
         "toProviderUsdc": None if result.to_provider is None else format_usdc(result.to_provider),
         "toClientUsdc": None if result.to_client is None else format_usdc(result.to_client),
+        "payouts": payout_list(result),
         "status": job.status,
     }
 
@@ -151,13 +183,25 @@ def escrow_submit(client: NexusClient, args: argparse.Namespace) -> Any:
 def escrow_approve(client: NexusClient, args: argparse.Namespace) -> Any:
     result = client.escrow.approve_milestone(args.job_id, args.index)
     job = client.escrow.get_job(args.job_id)
-    return {"tx": result.hash, "jobId": args.job_id, "index": args.index, "status": job.status}
+    return {
+        "tx": result.hash,
+        "jobId": args.job_id,
+        "index": args.index,
+        "payouts": payout_list(result),
+        "status": job.status,
+    }
 
 
 def escrow_claim(client: NexusClient, args: argparse.Namespace) -> Any:
     result = client.escrow.claim_approval(args.job_id, args.index)
     job = client.escrow.get_job(args.job_id)
-    return {"tx": result.hash, "jobId": args.job_id, "index": args.index, "status": job.status}
+    return {
+        "tx": result.hash,
+        "jobId": args.job_id,
+        "index": args.index,
+        "payouts": payout_list(result),
+        "status": job.status,
+    }
 
 
 def escrow_get(client: NexusClient, args: argparse.Namespace) -> Any:

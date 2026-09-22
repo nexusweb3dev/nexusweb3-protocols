@@ -247,17 +247,16 @@ contract AuditGuardsTest is Test {
         assertFalse(access.isOperatorFor(address(0), address(0)) == false, "zero is trivially self");
     }
 
-    /// FINDING ACC-2 (Informational): an EXPIRED operator still has a non-zero storage entry, so
-    /// `revokeOperator` succeeds and `operatorExpiry` returns a stale, already-dead timestamp.
-    /// Off-chain monitors that treat non-zero expiry as "authorized" read this wrong.
-    function test_access_expiredOperatorKeepsStaleStorageEntry() public {
+    /// FIXED ACC-2: `operatorExpiry` reads 0 once the authorization lapsed, so monitors cannot
+    /// mistake a dead entry for a live one; `revokeOperator` still clears the stale storage.
+    function test_access_expiredOperatorReadsZeroExpiry() public {
         uint48 expiry = uint48(block.timestamp + 1 hours);
         vm.prank(principal);
         access.authorizeOperator(operator, expiry);
 
         vm.warp(expiry + 1);
         assertFalse(access.isOperatorFor(principal, operator), "expired");
-        assertEq(access.operatorExpiry(principal, operator), expiry, "storage still non-zero after expiry");
+        assertEq(access.operatorExpiry(principal, operator), 0, "lapsed authorization must read as 0");
 
         vm.prank(principal);
         access.revokeOperator(operator); // succeeds on an already-dead entry

@@ -159,10 +159,9 @@ $150. `createJob` returns `jobId` in the transaction receipt logs (`JobCreated`)
 
 If you set a non-zero `$ARBITER`, the contract checks on-chain (via `AgentAccess.operatorExpiry`)
 that the arbiter is not an operator of you or the provider, and that neither of you is an operator
-of the arbiter — the transaction reverts with `InvalidParty` otherwise. Because this check reads
-`operatorExpiry` (raw, can be stale) rather than `isOperatorFor` (live), an operator relationship
-that has since expired but was never explicitly `revokeOperator`-ed still disqualifies that
-address as an arbiter. That check only catches operator relationships; it cannot detect an arbiter
+of the arbiter — the transaction reverts with `InvalidParty` otherwise. The check uses live
+authorizations only (`operatorExpiry` returns 0 once a grant has lapsed), so a former operator
+whose grant expired is eligible again. That check only catches operator relationships; it cannot detect an arbiter
 address the client secretly controls through some other principal, so as the provider you should
 still independently vet whoever you agree to.
 

@@ -80,7 +80,7 @@ Read-only use needs no wallet at all: `createNexusClient({ publicClient, address
 |---|---|
 | `access` | `authorizeOperator`, `revokeOperator`, `renounceOperator`, `isOperatorFor`, `operatorExpiry` |
 | `amount` | `parseUsdc`, `formatUsdc`, `toBaseUnits`, `USDC_DECIMALS` (top-level exports, not a namespace) |
-| `identity` | `register`, `setAgentURI`, `getAgent`, `isRegistered`, `getAgentByName`, `linkERC8004`, `registryEpoch` |
+| `identity` | `register`, `rename`, `setAgentURI`, `getAgent`, `isRegistered`, `getAgentByName`, `linkERC8004`, `registryEpoch` |
 | `reputation` | `getScore`, `getTier` (`'BRONZE' \| 'SILVER' \| 'GOLD' \| 'PLATINUM'`), `getStats` |
 | `killSwitch` | `register`, `setGuardian`, `kill`, `pause`, `unpause`, `resume`, `resetSession`, `isActive`, `getConfig`, `remainingSpend` |
 | `auditLog` | `log` (string action type → bytes32), `getAgentLogs` (decoded back to strings) |
@@ -91,9 +91,32 @@ Writes wait for the receipt and return `{ hash, receipt }`; `createJob*` also re
 `auditLog.log` returns `logId`, both decoded from the receipt logs. Enums come back as string
 unions, never numbers.
 
+`approveMilestone`, `claimApproval`, `resolve`, `settleExpired` and `cancelJob` additionally return
+`payouts`, every `PayoutSettled` in the receipt in emission order:
+
+```ts
+const release = await nexus.escrow.approveMilestone(jobId, 0);
+for (const payout of release.payouts) {
+  console.log(payout.account, formatUsdc(payout.amount), payout.delivered);
+}
+```
+
+`delivered: false` is **not** a failed call. A transfer that bounces — a blacklisted recipient, a
+token that returns false — never blocks a job: the escrow parks the amount as claimable for that
+account instead, and `withdrawClaimable` recovers it later. Both outcomes leave the transaction
+successful, so `delivered` is the only way to tell them apart without re-reading the chain.
+
+`access.operatorExpiry(agent, operator)` returns 0 whenever there is no live authorization —
+never granted, revoked, renounced, **or simply lapsed**. A non-zero result is therefore always in
+the future, so it never disagrees with `isOperatorFor`.
+
 `access.renounceOperator(agent)` is signed by the operator itself, so a hot key that may have
 leaked can cut itself off without waiting for the principal. Agent names accept only lowercase
 `a-z`, digits, `-`, `_` and `.`; anything else reverts with `InvalidName`.
+
+`identity.rename(agent, newName)` takes a new unique handle and releases the old one, which then
+becomes free for anyone else to register. It follows the same charset rule as `register`, reverts
+with `NameTaken` if the new handle is in use, and works on a deactivated profile too.
 
 `killSwitch.resetSession` is **principal-only**: it restores spending headroom, so neither an
 operator nor the restrict-only guardian may call it. Sign it with the agent principal itself or it
@@ -180,14 +203,16 @@ Exposes the stack to Claude Desktop, OpenClaw and any other MCP client over stdi
 starts read-only and the write tools refuse with an explanatory error instead of failing silently.
 `nexus_access_authorize_operator` is hidden unless `NEXUS_MCP_ALLOW_PRINCIPAL_WRITES=1`, because it
 hands another key full authority and the model driving the server reads untrusted on-chain text.
-`NEXUS_MCP_MAX_JOB_AMOUNT` caps the total of a single job in base units.
+`NEXUS_MCP_MAX_JOB_AMOUNT` caps the total of a single job, as a USDC figure in dollars like every
+other amount here.
 
 | Tool | Kind |
 |---|---|
 | `nexus_identity_get`, `nexus_reputation_get`, `nexus_killswitch_status` | read |
 | `nexus_escrow_get_job`, `nexus_escrow_list_jobs`, `nexus_auditlog_list` | read |
 | `nexus_access_check_operator` | read |
-| `nexus_identity_register`, `nexus_access_authorize_operator` | write |
+| `nexus_identity_register`, `nexus_identity_rename` | write |
+| `nexus_access_authorize_operator` | write |
 | `nexus_access_renounce_operator` | write |
 | `nexus_escrow_create_job`, `nexus_escrow_accept_job`, `nexus_escrow_submit_milestone` | write |
 | `nexus_escrow_approve_milestone`, `nexus_escrow_claim_approval` | write |
@@ -198,12 +223,28 @@ base units — including `NEXUS_MCP_MAX_JOB_AMOUNT`, which the startup banner ec
 a value copied from an older base-unit config is obvious immediately. Every tool returns JSON text,
 and every failure comes back as `isError: true` content rather than a transport error.
 
+`nexus_escrow_approve_milestone`, `nexus_escrow_claim_approval` and `nexus_escrow_settle_expired`
+report `payouts` alongside the transaction hash, with amounts in USDC and the same `delivered` flag
+the SDK returns.
+
+#### Untrusted text
+
+Agent names, agentURIs, audit-log entries and revert reasons are written by counterparties, and
+they land verbatim in the model's context. Nothing on this surface concatenates them into prose:
+on-chain strings always go out as JSON string fields, so quotes, backslashes and newlines arrive
+escaped. Failures are the same shape — `{"error": "…"}`, flattened to one line, control characters
+stripped and capped at 512 characters. A validation error that echoes the value you sent quotes it
+and truncates it to 64 characters (`provider is not a valid address (got: "0xnope")`), so a
+malformed argument cannot smuggle a forged instruction through an error message.
+
 `nexus_access_renounce_operator` is deliberately **not** behind `NEXUS_MCP_ALLOW_PRINCIPAL_WRITES`:
 it only ever removes the signing hot key's own authority, so the worst a prompt injection achieves
 is making the agent stop working. `nexus_access_authorize_operator` grants authority and stays
 gated.
 
 ## Development
+
+Node 22.12 or newer (the test runner requires it).
 
 ```bash
 npm install
@@ -224,8 +265,10 @@ PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 cd sdk/ts && npm run e2e
 ```
 
-The script authorizes operators, registers identities, has the provider accept the offer, runs a
-two-milestone job to `Completed`, and asserts settlement, reputation, tier and audit-log output. It
+The script authorizes operators, registers identities, renames one of them and checks the old
+handle came free, has the provider accept the offer, runs a two-milestone job to `Completed`, and
+asserts settlement, reputation, tier and audit-log output — including that each approval's
+`payouts[0].delivered` is true, so the money reached the provider rather than the claimable pool. It
 then exercises `signPermit` + `createJobWithPermit` with no prior approval, and pushes anvil's clock
 past the review window to claim an ignored milestone. Two timeout scenarios close it out: a
 bystander settling an expired job so the submitted milestone pays the provider and the pending one

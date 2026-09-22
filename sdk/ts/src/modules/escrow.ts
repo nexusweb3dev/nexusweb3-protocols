@@ -1,7 +1,15 @@
 import { getContract, zeroAddress, zeroHash, type Address, type Hex } from 'viem';
 import { AgentEscrowV2Abi } from '../abis/AgentEscrowV2.js';
 import { toBaseUnits } from '../amount.js';
-import { eventBigInt, requireEvent, sendWrite, type Context } from '../internal.js';
+import {
+  decodeEvents,
+  eventAddress,
+  eventBigInt,
+  eventBoolean,
+  requireEvent,
+  sendWrite,
+  type Context,
+} from '../internal.js';
 import {
   decodeJobStatus,
   decodeMilestoneStatus,
@@ -9,8 +17,10 @@ import {
   type CreateJobResult,
   type Job,
   type Milestone,
+  type Payout,
   type PermitSignature,
   type SettleExpiredResult,
+  type SettlementResult,
   type TxResult,
   type WithdrawClaimableResult,
 } from '../types.js';
@@ -91,17 +101,21 @@ export interface EscrowModule {
    */
   acceptJob(jobId: bigint): Promise<TxResult>;
   submitMilestone(jobId: bigint, index: number, deliverableHash: Hex): Promise<TxResult>;
-  /** Provider side: take a milestone the client left Submitted past the review window. */
-  claimApproval(jobId: bigint, index: number): Promise<TxResult>;
-  approveMilestone(jobId: bigint, index: number): Promise<TxResult>;
+  /**
+   * Provider side: take a milestone the client left Submitted past the review window.
+   * The result carries the resulting {@link SettlementResult.payouts}.
+   */
+  claimApproval(jobId: bigint, index: number): Promise<SettlementResult>;
+  /** Client side: release a milestone. The result carries the resulting {@link SettlementResult.payouts}. */
+  approveMilestone(jobId: bigint, index: number): Promise<SettlementResult>;
   /** Client side, inside the review window only; at most {@link EscrowModule.maxRejections} per milestone. */
   rejectMilestone(jobId: bigint, index: number, reasonHash?: Hex): Promise<TxResult>;
   /** Client side: full refund. Only before acceptance, or after it while nothing was ever submitted. */
-  cancelJob(jobId: bigint): Promise<TxResult>;
+  cancelJob(jobId: bigint): Promise<SettlementResult>;
   /** Either party; needs an arbiter on the job and an accepted job. */
   dispute(jobId: bigint, reasonHash?: Hex): Promise<TxResult>;
   /** Arbiter only: split the remaining balance, `providerBps` out of 10_000 to the provider. */
-  resolve(jobId: bigint, providerBps: number): Promise<TxResult>;
+  resolve(jobId: bigint, providerBps: number): Promise<SettlementResult>;
   /**
    * Anyone, once the job expired (Open past {@link EscrowModule.expiryOf}) or a dispute went
    * unresolved for {@link EscrowModule.disputeGrace}. Every Submitted milestone vests to the
@@ -144,6 +158,25 @@ export function createEscrowModule(ctx: Context): EscrowModule {
     return { ...result, jobId: eventBigInt(event.args, 'jobId') };
   };
 
+  /**
+   * Attach every payout the escrow attempted in this transaction. `PayoutSettled` fires for both
+   * outcomes, so a caller can see that a recipient was paid — or that the amount is now sitting
+   * in `claimable` because the transfer bounced — without re-reading the chain.
+   */
+  const withPayouts = (result: TxResult): SettlementResult => {
+    const payouts: Payout[] = decodeEvents(
+      AgentEscrowV2Abi,
+      'PayoutSettled',
+      address,
+      result.receipt.logs,
+    ).map((event) => ({
+      account: eventAddress(event.args, 'account'),
+      amount: eventBigInt(event.args, 'amount'),
+      delivered: eventBoolean(event.args, 'delivered'),
+    }));
+    return { ...result, payouts };
+  };
+
   return {
     address,
     async createJob(params) {
@@ -169,28 +202,32 @@ export function createEscrowModule(ctx: Context): EscrowModule {
       return sendWrite(ctx, address, AgentEscrowV2Abi, 'submitMilestone', [jobId, index, deliverableHash]);
     },
     async claimApproval(jobId, index) {
-      return sendWrite(ctx, address, AgentEscrowV2Abi, 'claimApproval', [jobId, index]);
+      return withPayouts(await sendWrite(ctx, address, AgentEscrowV2Abi, 'claimApproval', [jobId, index]));
     },
     async approveMilestone(jobId, index) {
-      return sendWrite(ctx, address, AgentEscrowV2Abi, 'approveMilestone', [jobId, index]);
+      return withPayouts(
+        await sendWrite(ctx, address, AgentEscrowV2Abi, 'approveMilestone', [jobId, index]),
+      );
     },
     async rejectMilestone(jobId, index, reasonHash = zeroHash) {
       return sendWrite(ctx, address, AgentEscrowV2Abi, 'rejectMilestone', [jobId, index, reasonHash]);
     },
     async cancelJob(jobId) {
-      return sendWrite(ctx, address, AgentEscrowV2Abi, 'cancelJob', [jobId]);
+      return withPayouts(await sendWrite(ctx, address, AgentEscrowV2Abi, 'cancelJob', [jobId]));
     },
     async dispute(jobId, reasonHash = zeroHash) {
       return sendWrite(ctx, address, AgentEscrowV2Abi, 'dispute', [jobId, reasonHash]);
     },
     async resolve(jobId, providerBps) {
-      return sendWrite(ctx, address, AgentEscrowV2Abi, 'resolve', [jobId, providerBps]);
+      return withPayouts(
+        await sendWrite(ctx, address, AgentEscrowV2Abi, 'resolve', [jobId, providerBps]),
+      );
     },
     async settleExpired(jobId) {
       const result = await sendWrite(ctx, address, AgentEscrowV2Abi, 'settleExpired', [jobId]);
       const event = requireEvent(AgentEscrowV2Abi, 'JobExpired', address, result.receipt.logs);
       return {
-        ...result,
+        ...withPayouts(result),
         toProvider: eventBigInt(event.args, 'toProvider'),
         toClient: eventBigInt(event.args, 'toClient'),
       };

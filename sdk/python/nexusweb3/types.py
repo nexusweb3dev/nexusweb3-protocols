@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from .amount import UsdcAmount, to_base_units
 
@@ -27,6 +27,7 @@ __all__ = [
     "Milestone",
     "ActionLog",
     "CreateParams",
+    "Payout",
     "to_bytes32",
     "from_bytes32",
     "coerce_bytes32",
@@ -247,6 +248,31 @@ class Milestone:
             submitted_at=int(values[2]),
             rejections=int(values[3]),
             status=_by_index(MilestoneStatus, int(values[4])),
+        )
+
+
+@dataclass(frozen=True)
+class Payout:
+    """One payout attempt, decoded from `IAgentEscrowV2.PayoutSettled`.
+
+    A transfer that fails — a blacklisted recipient, a token that returns false — never blocks a
+    job: the escrow parks the amount as claimable for `account` instead, recoverable later with
+    `withdraw_claimable`. Both outcomes leave the transaction successful, so :attr:`delivered` is
+    the only way to tell them apart without re-reading the chain.
+    """
+
+    account: str
+    #: Base units moved, net of protocol fee where a fee applied.
+    amount: int
+    #: True when the tokens reached `account`; False when they were parked as claimable.
+    delivered: bool
+
+    @classmethod
+    def from_args(cls, args: Mapping[str, Any]) -> "Payout":
+        return cls(
+            account=str(args["account"]),
+            amount=int(args["amount"]),
+            delivered=bool(args["delivered"]),
         )
 
 

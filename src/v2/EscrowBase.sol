@@ -267,18 +267,20 @@ abstract contract EscrowBase is OperatorGated, Ownable2Step, ReentrancyGuard, Pa
     }
 
     /// @dev Pay `amount` to the provider minus protocol fee; returns net payout and fee.
-    function _payProvider(Job storage job, uint256 amount) internal returns (uint256 net, uint256 fee) {
+    function _payProvider(uint256 jobId, Job storage job, uint256 amount) internal returns (uint256 net, uint256 fee) {
         fee = _fee(amount);
         net = amount - fee;
         _routeFee(job.provider, fee);
-        _payOut(job.provider, net);
+        _payOut(jobId, job.provider, net);
     }
 
     /// @dev Transfer with claimable fallback so a failing recipient (e.g. blacklisted) never blocks a job.
-    function _payOut(address to, uint256 amount) internal {
+    ///      Always emits PayoutSettled so indexers can tell delivered from parked amounts.
+    function _payOut(uint256 jobId, address to, uint256 amount) internal {
         if (amount == 0) return;
         (bool ok, bytes memory data) = address(_token).call(abi.encodeCall(IERC20.transfer, (to, amount)));
         bool success = ok && (data.length == 0 || abi.decode(data, (bool)));
+        emit PayoutSettled(jobId, to, amount, success);
         if (success) return;
         _claimable[to] += amount;
         emit ClaimableAdded(to, amount);

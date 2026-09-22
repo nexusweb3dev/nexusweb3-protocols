@@ -18,6 +18,7 @@ import {
   http,
   keccak256,
   stringToHex,
+  zeroAddress,
   type Address,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -128,6 +129,18 @@ async function main(): Promise<void> {
     `provider name=${providerProfile.name}`,
   );
 
+  step('client operator renames the client identity, freeing the old handle');
+  const oldName = (await clientOperator.identity.getAgent(clientAddress)).name;
+  const newName = `${oldName}-renamed`;
+  await clientOperator.identity.rename(clientAddress, newName);
+  const renamed = await clientOperator.identity.getAgent(clientAddress);
+  const freed = await clientOperator.identity.getAgentByName(oldName);
+  check(
+    'rename takes the new name and releases the old one',
+    renamed.name === newName && freed === zeroAddress,
+    `name=${renamed.name} oldNameOwner=${freed}`,
+  );
+
   step('client operator creates a 2-milestone job ($100 + $150.50)');
   const milestones = ['100', '150.50'] as const;
   const total = parseUsdc(milestones[0]) + parseUsdc(milestones[1]);
@@ -164,9 +177,22 @@ async function main(): Promise<void> {
     );
     const submitted = await providerOperator.escrow.getMilestones(created.jobId);
     check(`milestone ${index} submitted`, submitted[index]?.status === 'Submitted', `status=${submitted[index]?.status}`);
-    await clientOperator.escrow.approveMilestone(created.jobId, index);
+    const release = await clientOperator.escrow.approveMilestone(created.jobId, index);
     const approved = await clientOperator.escrow.getMilestones(created.jobId);
     check(`milestone ${index} approved`, approved[index]?.status === 'Approved', `status=${approved[index]?.status}`);
+    // PayoutSettled proves the money actually reached the provider rather than landing in
+    // `claimable`, which a successful receipt alone cannot tell you.
+    const payout = release.payouts[0];
+    check(
+      `milestone ${index} payout delivered to the provider`,
+      release.payouts.length === 1 &&
+        payout !== undefined &&
+        payout.delivered === true &&
+        payout.account === providerAddress,
+      `payouts=${release.payouts
+        .map((entry) => `${entry.account}:${formatUsdc(entry.amount)}:${entry.delivered}`)
+        .join(' ')}`,
+    );
   }
 
   step('assert settlement, reputation and audit log');

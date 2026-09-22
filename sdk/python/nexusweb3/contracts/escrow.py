@@ -7,7 +7,7 @@ from dataclasses import replace
 from web3 import Web3
 
 from ..tx import TxResult
-from ..types import CreateParams, Job, Milestone, coerce_bytes32
+from ..types import CreateParams, Job, Milestone, Payout, coerce_bytes32
 from .base import Ownable2StepClient
 
 __all__ = ["EscrowClient"]
@@ -41,16 +41,22 @@ class EscrowClient(Ownable2StepClient):
         return self._with_job_id(result)
 
     def approve_milestone(self, job_id: int, index: int) -> TxResult:
-        """Pay the provider for milestone `index` (minus fee) and advance the job."""
-        return self._send("approveMilestone", int(job_id), int(index))
+        """Pay the provider for milestone `index` (minus fee) and advance the job.
+
+        The returned :class:`TxResult` carries `payouts` decoded from `PayoutSettled`.
+        """
+        return self._with_payouts(self._send("approveMilestone", int(job_id), int(index)))
 
     def reject_milestone(self, job_id: int, index: int, reason_hash: str | bytes | None = None) -> TxResult:
         """Send a Submitted milestone back, inside `REVIEW_WINDOW` and at most `MAX_REJECTIONS` times."""
         return self._send("rejectMilestone", int(job_id), int(index), coerce_bytes32(reason_hash))
 
     def cancel_job(self, job_id: int) -> TxResult:
-        """Full refund. Allowed before acceptance, and after it only while nothing was ever submitted."""
-        return self._send("cancelJob", int(job_id))
+        """Full refund. Allowed before acceptance, and after it only while nothing was ever submitted.
+
+        The returned :class:`TxResult` carries `payouts` decoded from `PayoutSettled`.
+        """
+        return self._with_payouts(self._send("cancelJob", int(job_id)))
 
     # ─── Provider ───────────────────────────────────────────────────────
     def accept_job(self, job_id: int) -> TxResult:
@@ -66,16 +72,22 @@ class EscrowClient(Ownable2StepClient):
         return self._send("submitMilestone", int(job_id), int(index), coerce_bytes32(deliverable_hash))
 
     def claim_approval(self, job_id: int, index: int) -> TxResult:
-        """Provider self-approval of a milestone the client left Submitted past `REVIEW_WINDOW`."""
-        return self._send("claimApproval", int(job_id), int(index))
+        """Provider self-approval of a milestone the client left Submitted past `REVIEW_WINDOW`.
+
+        The returned :class:`TxResult` carries `payouts` decoded from `PayoutSettled`.
+        """
+        return self._with_payouts(self._send("claimApproval", int(job_id), int(index)))
 
     # ─── Either party / arbiter / anyone ────────────────────────────────
     def dispute(self, job_id: int, reason_hash: str | bytes | None = None) -> TxResult:
         return self._send("dispute", int(job_id), coerce_bytes32(reason_hash))
 
     def resolve(self, job_id: int, provider_bps: int) -> TxResult:
-        """Arbiter only: split the remaining funds, `provider_bps` out of 10_000 to the provider."""
-        return self._send("resolve", int(job_id), int(provider_bps))
+        """Arbiter only: split the remaining funds, `provider_bps` out of 10_000 to the provider.
+
+        The returned :class:`TxResult` carries `payouts` decoded from `PayoutSettled`.
+        """
+        return self._with_payouts(self._send("resolve", int(job_id), int(provider_bps)))
 
     def settle_expired(self, job_id: int) -> TxResult:
         """Anyone: close out a job time has decided.
@@ -83,9 +95,9 @@ class EscrowClient(Ownable2StepClient):
         Open jobs qualify past `expiry_of`, Disputed ones `DISPUTE_GRACE` after `disputed_at`.
         Every Submitted milestone vests to the provider and every Pending one refunds the client,
         so client silence no longer claws back delivered work. The returned :class:`TxResult`
-        carries `to_provider` and `to_client` decoded from `JobExpired`.
+        carries `to_provider` and `to_client` decoded from `JobExpired`, plus `payouts`.
         """
-        result = self._send("settleExpired", int(job_id))
+        result = self._with_payouts(self._send("settleExpired", int(job_id)))
         args = self._event_args("JobExpired", result.receipt)
         if not args:
             return result
@@ -185,6 +197,17 @@ class EscrowClient(Ownable2StepClient):
             Web3.to_checksum_address(kill_switch),
             Web3.to_checksum_address(fee_router),
         )
+
+    def _with_payouts(self, result: TxResult) -> TxResult:
+        """Attach every `PayoutSettled` this transaction emitted, in log order.
+
+        The event fires for a delivered transfer and for one that bounced into `claimable` alike,
+        so a caller can see where the money actually went without a second round trip.
+        """
+        payouts = tuple(
+            Payout.from_args(args) for args in self._event_args("PayoutSettled", result.receipt)
+        )
+        return replace(result, payouts=payouts)
 
     def _with_job_id(self, result: TxResult) -> TxResult:
         job_id = self._first_event_arg("JobCreated", result.receipt, "jobId")

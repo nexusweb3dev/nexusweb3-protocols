@@ -17,7 +17,11 @@ export interface AccessModule {
   renounceOperator(agent: Address): Promise<TxResult>;
   /** True when `caller` is `agent` itself or one of its unexpired operators. */
   isOperatorFor(agent: Address, caller: Address): Promise<boolean>;
-  /** 0 when `operator` is not authorized for `agent`. */
+  /**
+   * Unix second at which `operator`'s authorization for `agent` lapses, or 0 when there is no
+   * live authorization — never granted, revoked, renounced, or simply expired. A non-zero value
+   * is therefore always in the future, so this and {@link AccessModule.isOperatorFor} agree.
+   */
   operatorExpiry(agent: Address, operator: Address): Promise<number>;
 }
 

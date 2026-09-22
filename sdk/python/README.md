@@ -68,8 +68,27 @@ Sub-clients: `access`, `identity`, `reputation`, `kill_switch`, `audit_log`, `es
 `usdc`. Reads need no account; writes sign, send and wait for the receipt, returning a `TxResult`
 with `hash`, `receipt` and `job_id` / `log_id` decoded from `JobCreated` / `ActionLogged`.
 
+`TxResult.payouts` carries every `PayoutSettled` the transaction emitted, in log order, for
+`approve_milestone`, `claim_approval`, `resolve`, `settle_expired` and `cancel_job`:
+
+```python
+release = client.escrow.approve_milestone(job_id, 0)
+for payout in release.payouts:
+    print(payout.account, format_usdc(payout.amount), payout.delivered)
+```
+
+`delivered=False` is **not** a failed call. A transfer that bounces — a blacklisted recipient, a
+token that returns false — never blocks a job: the escrow parks the amount as claimable for that
+account instead, recoverable later with `withdraw_claimable`. Both outcomes leave the transaction
+successful, so `delivered` is the only way to tell them apart without re-reading the chain. Every
+other call leaves `payouts` empty.
+
+`access.operator_expiry(agent, operator)` returns 0 whenever there is no live authorization —
+never granted, revoked, renounced, **or simply lapsed**. A non-zero result is therefore always in
+the future, so it never disagrees with `is_operator_for`.
+
 Structs come back as dataclasses (`AgentProfile`, `Stats`, `AgentConfig`, `Job`, `Milestone`,
-`ActionLog`) and enums as readable strings (`JobStatus.OPEN.value == "Open"`, `Tier.GOLD`).
+`ActionLog`, `Payout`) and enums as readable strings (`JobStatus.OPEN.value == "Open"`, `Tier.GOLD`).
 `bytes32` action types round-trip through `to_bytes32` / `from_bytes32`. `Job` carries
 `accepted_at`, `disputed_at` and `ever_submitted`; `Milestone` carries `rejections`.
 
@@ -104,6 +123,10 @@ proposes; nothing moves until the proposed address calls `accept_ownership` itse
 leaked can cut itself off without waiting for the principal. `identity.register` accepts only
 lowercase `a-z`, digits, `-`, `_` and `.` in a name; anything else reverts with `InvalidName`.
 
+`identity.rename(agent, new_name)` takes a new unique handle and releases the old one, which then
+becomes free for anyone else to register. Same charset rule as `register`, reverts with `NameTaken`
+if the new handle is in use, and works on a deactivated profile too.
+
 `kill_switch.reset_session` is **principal-only** — it restores spending headroom, so neither an
 operator nor the restrict-only guardian may call it (`NotPrincipal` otherwise), and
 `remaining_spend` never reverts. `identity.link_erc8004` rejects a zero `agent_id`
@@ -136,6 +159,7 @@ export NEXUS_PRINCIPAL=0x...          # the agent principal it acts for
 
 nexusweb3 access renounce --agent 0xPRINCIPAL   # this hot key drops its own rights
 nexusweb3 identity register --name my-agent --uri ipfs://profile.json --type 1
+nexusweb3 identity rename --name my-new-agent    # old handle becomes free again
 nexusweb3 identity get --agent 0xPRINCIPAL
 nexusweb3 reputation get --agent 0xPRINCIPAL
 nexusweb3 escrow create --provider 0xPROVIDER --amounts 100,150 --deadline-hours 168
@@ -152,12 +176,14 @@ nexusweb3 auditlog list --agent 0xPRINCIPAL --limit 20
 ```
 
 Every command prints JSON and exits non-zero on error. Amounts in and out are USDC in dollars
-(`--amounts 100,150.50` is a $250.50 job), never base units.
+(`--amounts 100,150.50` is a $250.50 job), never base units. `escrow approve`, `escrow claim` and
+`escrow settle` also print a `payouts` array with each recipient, the amount in USDC and whether
+the transfer was delivered or parked as claimable.
 
 ## Tests
 
 ```bash
-pytest -q                 # 59 unit tests, no chain needed
+pytest -q                 # 67 unit tests, no chain needed
 ```
 
 ## End-to-end
@@ -172,9 +198,11 @@ cd sdk/python && python scripts/e2e.py
 ```
 
 `scripts/e2e.py` runs the full flow with anvil accounts 0-5: principals authorize operators, the
-operators register identities, the client operator creates a two-milestone job ($100 + $150.50) from USDC strings, the
-provider accepts it, submits both milestones and the client approves them, then it asserts
-`Completed`, the $250.50 payout, two positive reputation entries and the audit trail. A permit phase
+operators register identities, one is renamed and the old handle checked free again, the client
+operator creates a two-milestone job ($100 + $150.50) from USDC strings, the provider accepts it,
+submits both milestones and the client approves them, then it asserts `Completed`, the $250.50
+payout, two positive reputation entries and the audit trail. Each approval also asserts its single
+`PayoutSettled` was `delivered` to the provider rather than parked as claimable. A permit phase
 (`scripts/e2e_permit.py`) signs an EIP-2612 permit and calls `create_job_with_permit` with no prior
 approval, then has the provider accept and submit, advances the anvil clock 8 days and claims the
 milestone through `claim_approval`. A timeout phase (`scripts/e2e_timeouts.py`) closes with two

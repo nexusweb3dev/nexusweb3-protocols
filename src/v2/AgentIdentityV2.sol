@@ -83,6 +83,22 @@ contract AgentIdentityV2 is OperatorGated, Ownable2Step, Pausable, IAgentIdentit
         emit AgentRegistered(agent, name, agentType, agentURI);
     }
 
+    /// @notice Take a new unique name and release the old one. Works for deactivated profiles too.
+    /// @param agent Agent principal (or via operator).
+    /// @param newName New name; same charset and length rules as `register`.
+    function rename(address agent, string calldata newName) external whenNotPaused onlyAgentOrOperator(agent) {
+        AgentProfile storage profile = _requireProfile(agent);
+        _validateName(newName);
+        bytes32 newHash = keccak256(abi.encode(newName));
+        if (_nameOwner[newHash] != address(0)) revert NameTaken(newHash);
+        string memory oldName = profile.name;
+        delete _nameOwner[keccak256(abi.encode(oldName))];
+        _nameOwner[newHash] = agent;
+        profile.name = newName;
+        profile.updatedAt = uint48(block.timestamp);
+        emit AgentRenamed(agent, oldName, newName);
+    }
+
     /// @notice Replace the metadata URI of a registered agent.
     /// @param agent Agent principal whose profile is updated.
     /// @param agentURI New metadata URI, 0..512 bytes.

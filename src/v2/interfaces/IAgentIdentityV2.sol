@@ -16,6 +16,7 @@ interface IAgentIdentityV2 {
 
     event AgentRegistered(address indexed agent, string name, uint8 agentType, string agentURI);
     event AgentURIUpdated(address indexed agent, string agentURI);
+    event AgentRenamed(address indexed agent, string oldName, string newName);
     event AgentTypeUpdated(address indexed agent, uint8 agentType);
     event AgentDeactivated(address indexed agent);
     event AgentReactivated(address indexed agent);
@@ -45,6 +46,8 @@ interface IAgentIdentityV2 {
     ///         what keeps two visually identical handles from being two distinct registrations.
     function register(address agent, string calldata name, string calldata agentURI, uint8 agentType) external;
     function setAgentURI(address agent, string calldata agentURI) external;
+    /// @notice Take a new unique name and release the old one. Works for deactivated profiles too.
+    function rename(address agent, string calldata newName) external;
     function setAgentType(address agent, uint8 agentType) external;
     function deactivate(address agent) external;
     function reactivate(address agent) external;

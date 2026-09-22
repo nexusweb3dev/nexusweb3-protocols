@@ -24,6 +24,14 @@ class IdentityClient(Ownable2StepClient):
             "register", Web3.to_checksum_address(agent), name, agent_uri, int(agent_type)
         )
 
+    def rename(self, agent: str, new_name: str) -> TxResult:
+        """Take `new_name` and release the old one, which then becomes free for anyone else.
+
+        Same charset rule as :meth:`register`, and `new_name` must be unused or the call reverts
+        with `NameTaken`. Works on a deactivated profile too.
+        """
+        return self._send("rename", Web3.to_checksum_address(agent), new_name)
+
     def set_agent_uri(self, agent: str, agent_uri: str) -> TxResult:
         return self._send("setAgentURI", Web3.to_checksum_address(agent), agent_uri)
 

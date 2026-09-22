@@ -40,7 +40,9 @@ def test_withdraw_claimable_takes_an_account_and_a_recipient() -> None:
 
 
 def test_escrow_abi_declares_the_new_events_and_errors() -> None:
-    assert {"JobAccepted", "JobExpired", "ClaimableWithdrawn"} <= _abi_names("AgentEscrowV2", "event")
+    assert {"JobAccepted", "JobExpired", "ClaimableWithdrawn", "PayoutSettled"} <= _abi_names(
+        "AgentEscrowV2", "event"
+    )
     assert {
         "NotAccepted",
         "AlreadyAccepted",
@@ -86,3 +88,26 @@ def test_sibling_module_changes_are_in_the_abis() -> None:
     assert "registryEpoch" in _abi_names("AgentIdentityV2", "function")
     assert "InvalidERC8004Id" in _abi_names("AgentIdentityV2", "error")
     assert "ReferralCallFailed" in _abi_names("FeeRouter", "event")
+
+
+def test_payout_settled_carries_the_fields_the_sdk_reads_back() -> None:
+    entry = next(
+        e for e in load_abi("AgentEscrowV2") if e["type"] == "event" and e["name"] == "PayoutSettled"
+    )
+    assert [arg["name"] for arg in entry["inputs"]] == ["jobId", "account", "amount", "delivered"]
+    assert [arg["type"] for arg in entry["inputs"]] == ["uint256", "address", "uint256", "bool"]
+
+
+def test_identity_abi_exposes_rename_and_its_event() -> None:
+    entry = next(
+        e for e in load_abi("AgentIdentityV2") if e["type"] == "function" and e["name"] == "rename"
+    )
+    assert [arg["name"] for arg in entry["inputs"]] == ["agent", "newName"]
+    assert "AgentRenamed" in _abi_names("AgentIdentityV2", "event")
+
+
+def test_sdk_wraps_every_new_contract_call() -> None:
+    from nexusweb3.contracts import EscrowClient, IdentityClient
+
+    assert callable(IdentityClient.rename)
+    assert callable(EscrowClient._with_payouts)

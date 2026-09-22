@@ -11,6 +11,12 @@ export interface IdentityModule {
    */
   register(agent: Address, name: string, agentURI: string, agentType: number): Promise<TxResult>;
   setAgentURI(agent: Address, agentURI: string): Promise<TxResult>;
+  /**
+   * Take `newName` and release the old one, so the previous handle becomes free for anyone to
+   * register. Same charset rule as {@link IdentityModule.register}, and `newName` must be unused.
+   * Works on a deactivated profile too.
+   */
+  rename(agent: Address, newName: string): Promise<TxResult>;
   setAgentType(agent: Address, agentType: number): Promise<TxResult>;
   deactivate(agent: Address): Promise<TxResult>;
   reactivate(agent: Address): Promise<TxResult>;
@@ -47,6 +53,9 @@ export function createIdentityModule(ctx: Context): IdentityModule {
     },
     async setAgentURI(agent, agentURI) {
       return sendWrite(ctx, address, AgentIdentityV2Abi, 'setAgentURI', [agent, agentURI]);
+    },
+    async rename(agent, newName) {
+      return sendWrite(ctx, address, AgentIdentityV2Abi, 'rename', [agent, newName]);
     },
     async setAgentType(agent, agentType) {
       return sendWrite(ctx, address, AgentIdentityV2Abi, 'setAgentType', [agent, agentType]);

@@ -16,6 +16,7 @@ import {IAgentEscrowV2} from "../../src/v2/interfaces/IAgentEscrowV2.sol";
 import {IAgentReputationV2} from "../../src/v2/interfaces/IAgentReputationV2.sol";
 import {IAgentAuditLogV2} from "../../src/v2/interfaces/IAgentAuditLogV2.sol";
 import {IAgentKillSwitchV2} from "../../src/v2/interfaces/IAgentKillSwitchV2.sol";
+import {IAgentIdentityV2} from "../../src/v2/interfaces/IAgentIdentityV2.sol";
 
 /// @notice Full-stack lifecycle: the loop that makes the stack sticky. One job flows through
 ///         Identity -> Access (operators) -> KillSwitch -> Escrow -> Reputation + AuditLog + FeeRouter.
@@ -500,5 +501,49 @@ contract IntegrationTest is Test {
     function test_revert_escrowConstructor_tokenWithoutCode() public {
         vm.expectRevert(IAgentEscrowV2.ZeroAddress.selector);
         new AgentEscrowV2(IAgentAccess(address(access)), IERC20(makeAddr("eoa-token")), owner);
+    }
+
+    function test_rename_releasesOldName_viaOperator() public {
+        vm.prank(clientOp);
+        identity.rename(client, "acme-buyer-2");
+        assertEq(identity.getAgentByName("acme-buyer"), address(0));
+        assertEq(identity.getAgentByName("acme-buyer-2"), client);
+        // Old name is free for someone else now.
+        address other = makeAddr("other");
+        vm.prank(other);
+        identity.register(other, "acme-buyer", "", 0);
+        // Cannot take a name in use, cannot use a bad charset.
+        vm.prank(clientOp);
+        vm.expectRevert(abi.encodeWithSelector(IAgentIdentityV2.NameTaken.selector, keccak256(abi.encode("dev-agent"))));
+        identity.rename(client, "dev-agent");
+        vm.prank(clientOp);
+        vm.expectRevert(IAgentIdentityV2.InvalidName.selector);
+        identity.rename(client, "Acme Buyer");
+    }
+
+    function test_operatorExpiry_readsZeroOnceLapsed_arbiterCheckUsesLiveOnly() public {
+        address exOp = makeAddr("exOp");
+        vm.prank(client);
+        access.authorizeOperator(exOp, uint48(block.timestamp + 1 hours));
+        assertGt(access.operatorExpiry(client, exOp), 0);
+        vm.warp(block.timestamp + 2 hours);
+        assertEq(access.operatorExpiry(client, exOp), 0);
+        assertFalse(access.isOperatorFor(client, exOp));
+        // A lapsed former operator is an acceptable arbiter again.
+        IAgentEscrowV2.CreateParams memory p = _params();
+        p.arbiter = exOp;
+        vm.prank(clientOp);
+        escrow.createJob(p);
+    }
+
+    function test_payoutSettled_deliveredAndParked() public {
+        uint256 jobId = _createAccepted();
+        vm.prank(providerOp);
+        escrow.submitMilestone(jobId, 0, keccak256("d"));
+        uint256 fee = M1 * FEE_BPS / 10_000;
+        vm.expectEmit(true, true, false, true, address(escrow));
+        emit IAgentEscrowV2.PayoutSettled(jobId, provider, M1 - fee, true);
+        vm.prank(clientOp);
+        escrow.approveMilestone(jobId, 0);
     }
 }

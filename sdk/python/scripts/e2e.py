@@ -20,6 +20,7 @@ from pathlib import Path
 from web3 import Web3
 
 from nexusweb3 import (
+    ZERO_ADDRESS,
     CreateParams,
     JobStatus,
     MilestoneStatus,
@@ -112,6 +113,21 @@ def _register_identities(checks: Checks, clients: dict[str, NexusClient]) -> Non
         )
 
 
+def _rename_identity(checks: Checks, clients: dict[str, NexusClient]) -> None:
+    """Take a new handle and release the old one, which becomes free for anyone else."""
+    operator = clients["client_operator"]
+    principal = clients["client_principal"].address
+    old_name = operator.identity.get_agent(principal).name
+    new_name = f"{old_name}-renamed"
+    operator.identity.rename(principal, new_name)
+    profile = operator.identity.get_agent(principal)
+    checks.check(
+        "rename takes the new name and releases the old one",
+        profile.name == new_name and operator.identity.get_agent_by_name(old_name) == ZERO_ADDRESS,
+        f"name={profile.name} oldNameOwner={operator.identity.get_agent_by_name(old_name)}",
+    )
+
+
 def _chain_now(client: NexusClient) -> int:
     """Chain time, not wall-clock time: anvil may be ahead after evm_increaseTime."""
     return int(client.w3.eth.get_block("latest")["timestamp"])
@@ -163,10 +179,19 @@ def _run_milestones(checks: Checks, clients: dict[str, NexusClient], job_id: int
         checks.check(
             f"milestone {index} submitted", submitted.status is MilestoneStatus.SUBMITTED, str(submitted.status)
         )
-        client_op.escrow.approve_milestone(job_id, index)
+        release = client_op.escrow.approve_milestone(job_id, index)
         approved = client_op.escrow.get_milestones(job_id)[index]
         checks.check(
             f"milestone {index} approved", approved.status is MilestoneStatus.APPROVED, str(approved.status)
+        )
+        # PayoutSettled proves the tokens reached the provider instead of landing in `claimable`,
+        # which a successful receipt on its own cannot distinguish.
+        provider = clients["provider_principal"].address
+        payouts = release.payouts
+        checks.check(
+            f"milestone {index} payout delivered to the provider",
+            len(payouts) == 1 and payouts[0].delivered and payouts[0].account == provider,
+            " ".join(f"{p.account}:{format_usdc(p.amount)}:{p.delivered}" for p in payouts),
         )
 
 
@@ -234,6 +259,7 @@ def main() -> int:
     _authorize_operators(checks, clients)
     _approve_usdc(checks, clients)
     _register_identities(checks, clients)
+    _rename_identity(checks, clients)
     job_id = _create_job(checks, clients)
     _accept_job(checks, clients, job_id)
     _run_milestones(checks, clients, job_id)

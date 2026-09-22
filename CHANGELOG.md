@@ -2,6 +2,12 @@
 
 ## 2.1.0 — 2026-09-22 (security hardening)
 
+### Follow-up (same release)
+- `AgentAccess.operatorExpiry` returns 0 once an authorization lapsed (monitors and the arbiter-independence check see live operators only).
+- `AgentIdentityV2.rename(agent, newName)` — take a new name and release the old one; works on deactivated profiles.
+- `AgentEscrowV2` emits `PayoutSettled(jobId, account, amount, delivered)` on every payout attempt, so indexers can tell delivered from parked funds without joining `ClaimableAdded`.
+- SDKs: `identity.rename`, `payouts` decoded from receipts, sanitized error output, vitest upgraded (0 advisories). CI actions pinned to commit SHAs.
+
 ### AgentEscrowV2 / EscrowBase (`src/v2/`)
 - **Offer/accept lifecycle** — `createJob` now creates an offer only; the provider must call the
   new `acceptJob(jobId)` before submit, approve, reject, dispute, or reputation apply. Before

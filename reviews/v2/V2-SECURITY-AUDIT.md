@@ -85,21 +85,22 @@ Severity is the auditor's assessment of impact on the pre-fix code. Every findin
 | SDK-3 | sdk/ts MCP | `nexus_escrow_create_job` had no spend cap. | `NEXUS_MCP_MAX_JOB_AMOUNT`; gas multiplier bounded at 5×. |
 | SDK-4 | sdk/python | Permit domain version defaulted to "1"; Base USDC signs "2", failing silently into a confusing allowance error. | EIP-5267 detection with known-address fallback. |
 | SDK-5 | both SDKs | Amount units differed between CLI (USDC) and MCP (base units). | All surfaces take human USDC strings. |
+| F-9 | AgentEscrowV2 | Payout events reported gross amounts even when the transfer was parked. | New `PayoutSettled(jobId, account, amount, delivered)` on every payout attempt. |
+| ACC-2 | AgentAccess | `operatorExpiry` returned a stale timestamp after lapse, misleading monitors and the arbiter-independence check. | Returns 0 once lapsed; arbiter check therefore considers live operators only. |
+| L-02 | AgentIdentityV2 | A principal could never change or release its name. | `rename(agent, newName)` releases the old name (works on deactivated profiles). |
+| SDK-6 | sdk/ts MCP | Validation errors echoed raw untrusted input into tool output. | Sanitized/truncated messages; on-chain strings only as JSON fields. |
+| deps / CI | sdk/ts, workflows | 2 moderate dev-only npm advisories; actions pinned to tags. | vitest upgraded (0 advisories); all actions pinned to commit SHAs. |
 
 ### Informational / Accepted
 
 | ID | Note |
 |---|---|
-| F-9 | `MilestoneApproved`/`JobResolved`/`JobExpired` report gross amounts even when a transfer was parked; indexers must join `ClaimableAdded`. Documented. |
 | E-10 | Operator-key compromise blast radius = kill-switch limit, or the full escrow allowance without one. SDKs default to registering a kill switch; documented in the trust model. |
 | E-07 | With no arbiter, a client can reject up to 3 times per milestone at gas cost; funds return to the client at the deadline. Providers should require an arbiter for work they would not do on trust. |
 | — | `isOperatorFor(address(0), address(0))` is true; no caller uses address(0) as a sentinel principal. |
 | E-12 | Compromised client operator can drain the standing allowance up to the kill-switch session limit. Mitigations documented: kill switch by default, per-job `createJobWithPermit`, one-job allowances. |
 | KS-3 | A guardian kill is reversible by the principal without timelock. By design: the principal is the owner of the funds. |
-| L-02 | A deactivated identity's name is reserved to that principal forever; there is no admin override. By design (no owner power over identities). |
 | L-04 | Authorized protocols write audit-log entries for any agent. By design; the authorized set is Escrow only. |
-| ACC-2 | `operatorExpiry` may return an expired timestamp; `isOperatorFor` is the authoritative check. Documented. |
-| deps | npm production: 0 vulnerabilities; npm dev: 2 moderate (vitest mocker, dev-only); pip-audit on shipped deps: 0. |
 
 
 ## 4. Static-analysis triage

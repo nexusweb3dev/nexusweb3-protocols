@@ -84,7 +84,7 @@ contract AgentEscrowV2 is EscrowBase {
 
         job.status = JobStatus.Cancelled;
         job.refunded = job.total;
-        _payOut(job.client, job.total);
+        _payOut(jobId, job.client, job.total);
         _logBoth(job, ACT_CANCELLED, jobId, 0, job.total);
         emit JobCancelled(jobId, job.total);
     }
@@ -172,8 +172,8 @@ contract AgentEscrowV2 is EscrowBase {
         job.refunded += toClient;
         job.status = JobStatus.Resolved;
 
-        (, uint256 fee) = _payProvider(job, toProvider);
-        _payOut(job.client, toClient);
+        (, uint256 fee) = _payProvider(jobId, job, toProvider);
+        _payOut(jobId, job.client, toClient);
 
         // An even split is neutral; otherwise the side awarded the majority wins reputation.
         if (providerBps != BPS / 2 && _mayScore(job, remaining)) {
@@ -212,8 +212,8 @@ contract AgentEscrowV2 is EscrowBase {
         job.refunded += toClient;
         job.status = JobStatus.Expired;
 
-        _payProvider(job, toProvider);
-        _payOut(job.client, toClient);
+        _payProvider(jobId, job, toProvider);
+        _payOut(jobId, job.client, toClient);
         if (toProvider > 0 && _mayScore(job, toProvider)) _recordReputation(job.provider, true, toProvider);
         _logBoth(job, ACT_EXPIRED, jobId, 0, toProvider + toClient);
         emit JobExpired(jobId, toProvider, toClient);
@@ -302,7 +302,7 @@ contract AgentEscrowV2 is EscrowBase {
         job.approvedCount += 1;
         job.released += m.amount;
 
-        (uint256 net, uint256 fee) = _payProvider(job, m.amount);
+        (uint256 net, uint256 fee) = _payProvider(jobId, job, m.amount);
         if (_mayScore(job, m.amount)) _recordReputation(job.provider, true, m.amount);
         _logBoth(job, ACT_APPROVED, jobId, index, m.amount);
         emit MilestoneApproved(jobId, index, net, fee);

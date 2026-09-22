@@ -17,6 +17,7 @@ from nexusweb3 import (
     JobStatus,
     Milestone,
     MilestoneStatus,
+    Payout,
     Tier,
     ZERO_ADDRESS,
     ZERO_BYTES32,
@@ -313,3 +314,58 @@ def test_decode_revert_returns_none_for_unknown_payloads() -> None:
     index = build_error_index(load_abi("AgentEscrowV2"))
     assert decode_revert(index, _FakeRevert("0xdeadbeef")) is None
     assert decode_revert(index, Exception("boom")) is None
+
+
+# ─── payouts ────────────────────────────────────────────────────────────
+def test_payout_decodes_a_settled_event_argument_bag() -> None:
+    delivered = Payout.from_args(
+        {"jobId": 7, "account": "0x0000000000000000000000000000000000000a11", "amount": 250_500_000, "delivered": True}
+    )
+    assert delivered.account == "0x0000000000000000000000000000000000000a11"
+    assert delivered.amount == 250_500_000
+    assert delivered.delivered is True
+
+
+def test_payout_marks_a_bounced_transfer_as_undelivered() -> None:
+    """A failed transfer is parked as claimable; the transaction still succeeds."""
+    parked = Payout.from_args(
+        {"jobId": 7, "account": "0x0000000000000000000000000000000000000a22", "amount": 100, "delivered": False}
+    )
+    assert parked.delivered is False
+    assert to_jsonable(parked) == {
+        "account": "0x0000000000000000000000000000000000000a22",
+        "amount": 100,
+        "delivered": False,
+    }
+
+
+def test_tx_result_defaults_to_no_payouts() -> None:
+    from nexusweb3.tx import TxResult
+
+    assert TxResult(hash="0x1", receipt={}).payouts == ()
+
+
+def test_cli_renders_payouts_in_usdc() -> None:
+    from nexusweb3.cli_handlers import payout_list
+    from nexusweb3.tx import TxResult
+
+    result = TxResult(
+        hash="0x1",
+        receipt={},
+        payouts=(
+            Payout("0x0000000000000000000000000000000000000a11", 250_500_000, True),
+            Payout("0x0000000000000000000000000000000000000a22", 1_000_000, False),
+        ),
+    )
+    assert payout_list(result) == [
+        {"account": "0x0000000000000000000000000000000000000a11", "amountUsdc": "250.5", "delivered": True},
+        {"account": "0x0000000000000000000000000000000000000a22", "amountUsdc": "1", "delivered": False},
+    ]
+
+
+def test_cli_parses_identity_rename() -> None:
+    from nexusweb3.cli import build_parser
+
+    args = build_parser().parse_args(["identity", "rename", "--name", "new-handle"])
+    assert args.handler.__name__ == "identity_rename"
+    assert args.name == "new-handle"

@@ -95,6 +95,8 @@ interface IAgentEscrowV2 {
     event JobDisputed(uint256 indexed jobId, address indexed by, bytes32 reasonHash);
     event JobResolved(uint256 indexed jobId, uint16 providerBps, uint256 toProvider, uint256 toClient, uint256 fee);
     event JobExpired(uint256 indexed jobId, uint256 toProvider, uint256 toClient);
+    /// @notice Emitted for every payout attempt; `delivered == false` means the amount was parked as claimable.
+    event PayoutSettled(uint256 indexed jobId, address indexed account, uint256 amount, bool delivered);
     event ClaimableAdded(address indexed account, uint256 amount);
     event ClaimableWithdrawn(address indexed account, address indexed to, uint256 amount);
     event FeeBpsUpdated(uint256 oldBps, uint256 newBps);

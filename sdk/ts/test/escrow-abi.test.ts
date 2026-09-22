@@ -38,7 +38,7 @@ describe('AgentEscrowV2 ABI surface', () => {
 
   it('declares the new events and errors the SDK decodes', () => {
     expect(names('event')).toEqual(
-      expect.arrayContaining(['JobAccepted', 'JobExpired', 'ClaimableWithdrawn']),
+      expect.arrayContaining(['JobAccepted', 'JobExpired', 'ClaimableWithdrawn', 'PayoutSettled']),
     );
     expect(names('error')).toEqual(
       expect.arrayContaining([
@@ -49,6 +49,15 @@ describe('AgentEscrowV2 ABI surface', () => {
         'TokenAmountMismatch',
       ]),
     );
+  });
+
+  it('PayoutSettled carries the fields the SDK reads back as `payouts`', () => {
+    const entry = AgentEscrowV2Abi.find(
+      (item) => item.type === 'event' && item.name === 'PayoutSettled',
+    );
+    const inputs = entry && 'inputs' in entry ? entry.inputs : [];
+    expect(inputs.map((input) => input.name)).toEqual(['jobId', 'account', 'amount', 'delivered']);
+    expect(inputs.map((input) => input.type)).toEqual(['uint256', 'address', 'uint256', 'bool']);
   });
 
   it('exposes the new Job and Milestone fields through getJob / getMilestones', () => {
@@ -74,6 +83,18 @@ describe('sibling module ABIs', () => {
     );
     expect(functions).toContain('registryEpoch');
     expect(errors).toContain('InvalidERC8004Id');
+  });
+
+  it('AgentIdentityV2 exposes rename and the event that pairs with it', () => {
+    const entry = AgentIdentityV2Abi.find((item) => item.type === 'function' && item.name === 'rename');
+    expect(entry && 'inputs' in entry ? entry.inputs.map((input) => input.name) : []).toEqual([
+      'agent',
+      'newName',
+    ]);
+    const events = AgentIdentityV2Abi.filter((item) => item.type === 'event').map(
+      (item) => (item as { name: string }).name,
+    );
+    expect(events).toContain('AgentRenamed');
   });
 
   it('FeeRouter reports a failed referral payout instead of reverting', () => {

@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { formatUsdc } from '../../amount.js';
 import { NO_EXPIRY } from '../../modules/access.js';
-import { NexusError } from '../../types.js';
+import { NexusError, type Payout } from '../../types.js';
 import type { McpRuntime } from '../config.js';
 import { guard, parseAddress, parseAmount, parseBytes32, requireSigner, resolveAgent } from '../helpers.js';
 
@@ -20,6 +20,27 @@ const usdcArg = z
   .string()
   .regex(/^\d+(\.\d{1,6})?$/, 'Must be USDC in dollars, e.g. "100" or "100.50" — never base units.');
 
+const nameArg = z
+  .string()
+  .min(1)
+  .max(64)
+  .describe('Globally unique agent name: lowercase a-z, digits, "-", "_" and "." only.');
+
+/**
+ * Report every payout the escrow attempted, so the model can see that money moved — and to whom.
+ * `delivered: false` is not a failure of the call: the transfer bounced and the amount is parked
+ * as claimable for that account, recoverable with `nexus_escrow_withdraw_claimable`.
+ */
+function describePayouts(
+  payouts: readonly Payout[],
+): Array<{ account: string; amountUsdc: string; delivered: boolean }> {
+  return payouts.map((payout) => ({
+    account: payout.account,
+    amountUsdc: formatUsdc(payout.amount),
+    delivered: payout.delivered,
+  }));
+}
+
 /** Register every state-changing tool. All of them need NEXUS_PRIVATE_KEY. */
 export function registerWriteTools(server: McpServer, runtime: McpRuntime): void {
   const { client } = runtime;
@@ -31,7 +52,7 @@ export function registerWriteTools(server: McpServer, runtime: McpRuntime): void
       description:
         'Register the agent principal in AgentIdentityV2. Free and permanent; the name must be unused.',
       inputSchema: {
-        name: z.string().min(1).max(64).describe('Globally unique agent name.'),
+        name: nameArg,
         agentURI: z.string().max(512).default('').describe('Metadata JSON URI (endpoints, capabilities).'),
         agentType: z.number().int().min(0).max(10).default(0).describe('Free-form category, 0..10.'),
         agent: agentArg,
@@ -43,6 +64,26 @@ export function registerWriteTools(server: McpServer, runtime: McpRuntime): void
         const address = resolveAgent(runtime, agent);
         const result = await client.identity.register(address, name, agentURI, agentType);
         return { agent: address, name, txHash: result.hash };
+      }),
+  );
+
+  server.registerTool(
+    'nexus_identity_rename',
+    {
+      title: 'Rename an agent identity',
+      description:
+        'Take a new unique name for the agent principal and release the old one, which then ' +
+        'becomes free for anyone else to register. Works on a deactivated profile too.',
+      inputSchema: { newName: nameArg, agent: agentArg },
+    },
+    async ({ newName, agent }) =>
+      guard(async () => {
+        requireSigner(runtime);
+        const address = resolveAgent(runtime, agent);
+        const before = await client.identity.getAgent(address);
+        const result = await client.identity.rename(address, newName);
+        // Both names go out as JSON string fields; the old one is chain text this server did not write.
+        return { agent: address, oldName: before.name, newName, txHash: result.hash };
       }),
   );
 
@@ -223,7 +264,13 @@ export function registerWriteTools(server: McpServer, runtime: McpRuntime): void
         requireSigner(runtime);
         const result = await client.escrow.claimApproval(BigInt(jobId), index);
         const job = await client.escrow.getJob(BigInt(jobId));
-        return { jobId, index, jobStatus: job.status, txHash: result.hash };
+        return {
+          jobId,
+          index,
+          jobStatus: job.status,
+          payouts: describePayouts(result.payouts),
+          txHash: result.hash,
+        };
       }),
   );
 
@@ -240,7 +287,13 @@ export function registerWriteTools(server: McpServer, runtime: McpRuntime): void
         requireSigner(runtime);
         const result = await client.escrow.approveMilestone(BigInt(jobId), index);
         const job = await client.escrow.getJob(BigInt(jobId));
-        return { jobId, index, jobStatus: job.status, txHash: result.hash };
+        return {
+          jobId,
+          index,
+          jobStatus: job.status,
+          payouts: describePayouts(result.payouts),
+          txHash: result.hash,
+        };
       }),
   );
 
@@ -262,6 +315,7 @@ export function registerWriteTools(server: McpServer, runtime: McpRuntime): void
           jobId,
           toProviderUsdc: formatUsdc(result.toProvider),
           toClientUsdc: formatUsdc(result.toClient),
+          payouts: describePayouts(result.payouts),
           txHash: result.hash,
         };
       }),

@@ -36,7 +36,9 @@ contract AgentAccess is IAgentAccess {
         return _expiry[agent][caller] > block.timestamp;
     }
 
+    /// @notice Expiry of a live authorization, or 0 once it has lapsed or been revoked.
     function operatorExpiry(address agent, address operator) external view returns (uint48) {
-        return _expiry[agent][operator];
+        uint48 e = _expiry[agent][operator];
+        return e > block.timestamp ? e : 0;
     }
 }
